@@ -1,12 +1,18 @@
-/** HTTP integration tests with mocked `fetch` or custom handlers. */
+/** HTTP integration tests for /start_job & /status in `direct` mode (no Masumi node). */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentEndpointHandler } from "../src/agentEndpointHandler.js";
 import { buildApp } from "../src/app.js";
+import { __resetJobsForTests } from "../src/services/jobs.js";
 
-describe("POST /start_job with mocked Langdock", () => {
+describe("POST /start_job in direct mode with mocked Langdock", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
+    __resetJobsForTests();
+    delete process.env.PAYMENT_MODE;
+    delete process.env.MASUMI_PAYMENT_SERVICE_URL;
+    delete process.env.MASUMI_PAYMENT_SERVICE_TOKEN;
+
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
@@ -41,34 +47,55 @@ describe("POST /start_job with mocked Langdock", () => {
       url: "/start_job",
       payload: {
         identifier_from_purchaser: "job-1",
-        input_data: { text: "ping" },
+        input_data: [{ key: "text", value: "ping" }],
       },
     });
 
     expect(res.statusCode).toBe(200);
-    const json = res.json() as { id: string; inputHash: string };
+    const json = res.json() as {
+      id: string;
+      job_id: string;
+      input_hash: string;
+      inputHash: string;
+      status: string;
+      blockchainIdentifier: string;
+    };
     expect(json.id).toBeDefined();
-    expect(json.inputHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(json.id).toBe(json.job_id);
+    expect(json.input_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(json.inputHash).toBe(json.input_hash);
+    expect(json.status).toBe("awaiting_payment");
+    expect(json.blockchainIdentifier).toMatch(/^direct_/);
 
     const st = await app.inject({
       method: "GET",
       url: `/status?job_id=${json.id}`,
     });
     expect(st.statusCode).toBe(200);
-    const sj = st.json() as { status: string; result: string };
+    const sj = st.json() as {
+      status: string;
+      result: string;
+      input_hash: string;
+      output_hash: string;
+      job_id: string;
+    };
     expect(sj.status).toBe("completed");
     expect(sj.result).toBe("hello from mock");
+    expect(sj.input_hash).toBe(json.input_hash);
+    expect(sj.output_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(sj.job_id).toBe(json.id);
 
     await app.close();
   });
 
-  it("uses a custom start_job handler when provided", async () => {
+  it("accepts legacy object-form input_data and exposes it as an array to handlers", async () => {
     delete process.env.LANGDOCK_API_KEY;
     delete process.env.LANGDOCK_AGENT_ID;
 
     const endpointHandler = new AgentEndpointHandler();
     endpointHandler.setStartJobHandler(async (_id, input) => ({
-      echo: input,
+      receivedArray: Array.isArray(input),
+      items: input,
     }));
 
     const app = await buildApp({ endpointHandler });
@@ -88,9 +115,44 @@ describe("POST /start_job with mocked Langdock", () => {
       method: "GET",
       url: `/status?job_id=${json.id}`,
     });
-    const body = st.json() as { result: { echo: { foo: number } } };
-    expect(body.result.echo.foo).toBe(1);
+    const body = st.json() as {
+      result: { receivedArray: boolean; items: Array<{ key: string; value: unknown }> };
+    };
+    expect(body.result.receivedArray).toBe(true);
+    expect(body.result.items).toEqual([{ key: "foo", value: 1 }]);
 
+    await app.close();
+  });
+});
+
+describe("GET /input_schema", () => {
+  it("returns the default text field by default", async () => {
+    delete process.env.INPUT_SCHEMA_PATH;
+    delete process.env.INPUT_SCHEMA_JSON;
+    const app = await buildApp({ endpointHandler: new AgentEndpointHandler() });
+    const res = await app.inject({ method: "GET", url: "/input_schema" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      input_data: Array<{ id: string; type: string }>;
+    };
+    expect(body.input_data[0].id).toBe("text");
+    expect(body.input_data[0].type).toBe("string");
+    await app.close();
+  });
+});
+
+describe("/status error cases", () => {
+  it("400 when job_id missing", async () => {
+    const app = await buildApp({ endpointHandler: new AgentEndpointHandler() });
+    const res = await app.inject({ method: "GET", url: "/status" });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("404 for unknown job_id", async () => {
+    const app = await buildApp({ endpointHandler: new AgentEndpointHandler() });
+    const res = await app.inject({ method: "GET", url: "/status?job_id=nope" });
+    expect(res.statusCode).toBe(404);
     await app.close();
   });
 });
