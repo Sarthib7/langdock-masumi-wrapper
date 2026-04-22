@@ -1,52 +1,100 @@
 /**
- * Types for MIP-003-shaped HTTP payloads and the in-memory job record.
+ * MIP-003-shaped HTTP payloads, MIP-003 `input_data` item shape, and in-memory job record.
  */
 
-export type JobStatus = "running" | "completed" | "failed";
+/** Statuses defined by MIP-003 (§2 /status). */
+export type JobStatus =
+  | "awaiting_payment"
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "refunded";
 
-export type StartJobRequestBody = {
-  identifier_from_purchaser: string;
-  input_data?: Record<string, unknown>;
+/** Single MIP-003 `input_data` entry: `key` is the schema field id, `value` is the user input. */
+export type InputDataItem = {
+  key: string;
+  value: unknown;
 };
 
-/** JSON body for a successful `POST /start_job` (camelCase `inputHash`). */
+export type StartJobRequestBody = {
+  identifier_from_purchaser?: string;
+  identifierFromPurchaser?: string;
+  /** MIP-003 canonical form is an array of {key,value}; object form is also accepted. */
+  input_data?: InputDataItem[] | Record<string, unknown>;
+  inputData?: InputDataItem[] | Record<string, unknown>;
+};
+
+/** JSON body for a successful `POST /start_job`. `input_hash` uses snake_case per MIP-003 spec. */
 export type StartJobResponseBody = {
   id: string;
+  job_id: string;
   blockchainIdentifier: string;
   agentIdentifier: string;
   sellerVKey: string;
   identifierFromPurchaser: string;
+  input_hash: string;
+  /** camelCase alias kept for legacy clients. */
   inputHash: string;
   payByTime: number;
   submitResultTime: number;
   unlockTime: number;
   externalDisputeUnlockTime: number;
+  status: JobStatus;
+  amounts?: Array<{ amount: string; unit: string }>;
 };
 
-/** JSON body for `GET /status` when using the default handler. */
+/** JSON body for `GET /status` (MIP-003 §2). */
 export type StatusResponseBody = {
-  id?: string;
+  job_id: string;
   status: JobStatus;
   result?: unknown;
+  /** Alias that some clients expect; mirrors `result`. */
+  output?: unknown;
+  input_hash?: string;
+  output_hash?: string;
   error?: string;
+  message?: string;
+  created_at?: string;
+  completed_at?: string;
+  failed_at?: string;
+  payment_address?: string;
+  amount_lovelace?: number;
+  blockchain_identifier?: string;
 };
 
-/** JSON body for `GET /availability` default branch. */
+/** JSON body for `GET /availability` (MIP-003 §3). */
 export type AvailabilityResponseBody = {
-  status: "available";
+  status: "available" | "unavailable";
   type: "masumi-agent";
   message: string;
+  uptime_seconds?: number;
+  current_load?: {
+    active_jobs: number;
+    queued_jobs: number;
+    max_capacity?: number;
+  };
 };
 
-/** Single job row in the process-local store (`input_hash` uses snake_case internally). */
+/** In-process job row. */
 export type JobRecord = {
   id: string;
   blockchainIdentifier: string;
   identifierFromPurchaser: string;
   input_hash: string;
+  /** Canonical MIP-003 array form of the inputs (used by the runner). */
+  input_data: InputDataItem[];
   status: JobStatus;
   result?: unknown;
+  output_hash?: string;
   error?: string;
+  payByTime: number;
+  submitResultTime: number;
+  unlockTime: number;
+  externalDisputeUnlockTime: number;
+  amounts: Array<{ amount: string; unit: string }>;
   createdAt: number;
   updatedAt: number;
+  completedAt?: number;
+  failedAt?: number;
 };

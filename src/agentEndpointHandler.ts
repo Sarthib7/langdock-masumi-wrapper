@@ -4,10 +4,16 @@
  * active handler for the HTTP layer.
  */
 
-/** Runs when `POST /start_job` is accepted; return value is stored as the job result. */
+import type { InputDataItem } from "./types/masumi.js";
+
+/**
+ * Runs after `POST /start_job` payment-registration succeeds. Called with the
+ * canonical MIP-003 `input_data` array; use `inputDataToRecord` for object access.
+ * Return value is stored as the job result (and MIP-004 output-hashed).
+ */
 export type StartJobHandler = (
   identifierFromPurchaser: string,
-  inputData: Record<string, unknown>,
+  inputData: InputDataItem[],
 ) => Promise<unknown>;
 
 /** Optional override for `GET /status`; replaces the default in-memory implementation. */
