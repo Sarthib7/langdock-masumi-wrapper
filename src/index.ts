@@ -1,5 +1,6 @@
 /**
- * Package public API: handler types, app factory, config, and Langdock `start_job` factory.
+ * Package public API: handler types, app factory, config, Langdock handler factory,
+ * and the Masumi Payment Service client.
  */
 
 export {
@@ -13,5 +14,39 @@ export {
   createDefaultEndpointHandler,
   type BuildAppOptions,
 } from "./app.js";
-export { loadConfig, resolveAgentDisplayIdentity, type AppConfig } from "./config.js";
+export {
+  loadConfig,
+  resolveAgentDisplayIdentity,
+  type AppConfig,
+  type InputSchemaField,
+  type MasumiNetwork,
+  type PaymentMode,
+  type PriceAmount,
+} from "./config.js";
 export { createLangdockStartJobHandler } from "./services/langdockStartJob.js";
+export { inputDataToRecord } from "./utils/startJobBody.js";
+export {
+  MasumiPaymentClient,
+  MasumiPaymentError,
+  paymentIsLocked,
+  paymentIsTerminal,
+  type MasumiPaymentClientConfig,
+  type PaymentOnchainState,
+  type PaymentStatus,
+  type RegisterSaleArgs,
+  type RegisterSaleResult,
+} from "./services/masumiPayment.js";
+export {
+  computeInputHash,
+  computeOutputHash,
+  stringifyForHash,
+} from "./services/hashing.js";
+export type {
+  InputDataItem,
+  JobRecord,
+  JobStatus,
+  StartJobRequestBody,
+  StartJobResponseBody,
+  StatusResponseBody,
+  AvailabilityResponseBody,
+} from "./types/masumi.js";
