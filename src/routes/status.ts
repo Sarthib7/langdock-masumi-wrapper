@@ -1,14 +1,20 @@
 /**
- * `GET /status`: optional custom handler, else reads from the in-memory job store.
+ * `GET /status` (MIP-003 §2). Supports `job_id` and `jobId` query aliases.
+ * Returns `input_hash`, `output_hash`, result, timestamps, and payment info.
  */
 
 import type { FastifyInstance } from "fastify";
-import { randomUUID } from "node:crypto";
 import type { BridgeContext } from "./bridgeContext.js";
 import { getJob } from "../services/jobs.js";
 import type { StatusResponseBody } from "../types/masumi.js";
 
-/** Registers the `/status` route (`job_id` or `jobId` query). */
+function toIsoSeconds(msOrNumber: number | undefined): string | undefined {
+  if (msOrNumber === undefined) return undefined;
+  // `createdAt` is ms since epoch; Unix-second fields are much smaller.
+  const ms = msOrNumber > 1e12 ? msOrNumber : msOrNumber * 1000;
+  return new Date(ms).toISOString();
+}
+
 export function registerStatus(
   app: FastifyInstance,
   ctx: BridgeContext,
@@ -18,7 +24,10 @@ export function registerStatus(
   }>("/status", async (request, reply) => {
     const jobId = request.query.job_id ?? request.query.jobId;
     if (!jobId || !jobId.trim()) {
-      return reply.status(400).send({ error: "Missing job_id query parameter" });
+      return reply.status(400).send({
+        error: "INVALID_INPUT",
+        message: "Missing job_id query parameter",
+      });
     }
 
     const trimmed = jobId.trim();
@@ -30,25 +39,39 @@ export function registerStatus(
         return reply.status(200).send(out);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        return reply.status(500).send({ error: msg });
+        return reply.status(500).send({
+          error: "STATUS_HANDLER_ERROR",
+          message: msg,
+        });
       }
     }
 
     const job = getJob(trimmed);
     if (!job) {
-      return reply.status(404).send({ error: "Job not found" });
+      return reply.status(404).send({
+        error: "JOB_NOT_FOUND",
+        message: `No job exists with ID: ${trimmed}`,
+      });
     }
 
     const body: StatusResponseBody = {
-      id: randomUUID(),
+      job_id: job.id,
       status: job.status,
+      input_hash: job.input_hash,
+      blockchain_identifier: job.blockchainIdentifier,
+      created_at: toIsoSeconds(job.createdAt),
     };
-    if (job.status === "completed" && job.result !== undefined) {
+    if (job.result !== undefined) {
       body.result = job.result;
+      body.output = job.result;
     }
-    if (job.status === "failed" && job.error) {
+    if (job.output_hash) body.output_hash = job.output_hash;
+    if (job.error) {
       body.error = job.error;
+      body.message = job.error;
     }
+    if (job.completedAt) body.completed_at = toIsoSeconds(job.completedAt);
+    if (job.failedAt) body.failed_at = toIsoSeconds(job.failedAt);
 
     return reply.status(200).send(body);
   });

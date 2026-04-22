@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import type { AppConfig } from "../config.js";
 import type { StartJobHandler } from "../agentEndpointHandler.js";
 import type { LangdockUIMessage } from "../types/langdock.js";
+import type { InputDataItem } from "../types/masumi.js";
 import { inputDataToPromptText } from "./inputMapping.js";
 import {
   completeChat,
@@ -33,7 +34,7 @@ export function createLangdockStartJobHandler(
 ): StartJobHandler {
   return async (
     identifierFromPurchaser: string,
-    inputData: Record<string, unknown>,
+    inputData: InputDataItem[],
   ): Promise<unknown> => {
     void identifierFromPurchaser;
     assertLangdockEnv(config);

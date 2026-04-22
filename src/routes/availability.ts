@@ -1,3 +1,4 @@
+
 /**
  * `GET /availability`: optional custom handler, else returns a fixed healthy JSON body.
  */
