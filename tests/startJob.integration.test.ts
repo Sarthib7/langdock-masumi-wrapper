@@ -10,6 +10,9 @@ describe("POST /start_job in direct mode with mocked Langdock", () => {
   beforeEach(() => {
     __resetJobsForTests();
     delete process.env.PAYMENT_MODE;
+    delete process.env.PAYMENT_SERVICE_URL;
+    delete process.env.PAYMENT_API_KEY;
+    delete process.env.NETWORK;
     delete process.env.MASUMI_PAYMENT_SERVICE_URL;
     delete process.env.MASUMI_PAYMENT_SERVICE_TOKEN;
 

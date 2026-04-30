@@ -76,19 +76,19 @@ export function registerStartJob(
             "AGENT_IDENTIFIER and SELLER_VKEY must be set when PAYMENT_MODE=masumi",
         });
       }
-      if (!config.masumiPaymentServiceUrl || !config.masumiPaymentServiceToken) {
+      if (!config.paymentServiceUrl || !config.paymentApiKey) {
         return reply.status(500).send({
           error: "PAYMENT_SERVICE_NOT_CONFIGURED",
           message:
-            "MASUMI_PAYMENT_SERVICE_URL and MASUMI_PAYMENT_SERVICE_TOKEN are required",
+            "PAYMENT_SERVICE_URL and PAYMENT_API_KEY are required",
         });
       }
 
       const client = new MasumiPaymentClient({
-        baseUrl: config.masumiPaymentServiceUrl,
-        token: config.masumiPaymentServiceToken,
+        baseUrl: config.paymentServiceUrl,
+        apiKey: config.paymentApiKey,
+        authHeader: config.paymentApiAuthHeader,
         network: config.masumiNetwork,
-        paymentType: config.masumiPaymentType,
       });
 
       try {
@@ -100,7 +100,7 @@ export function registerStartJob(
           submitResultTime,
           unlockTime,
           externalDisputeUnlockTime,
-          amounts: config.priceAmounts,
+          requestedFunds: config.priceAmounts,
         });
         blockchainIdentifier = sale.blockchainIdentifier;
         payByTime = sale.payByTime;

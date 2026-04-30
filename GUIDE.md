@@ -4,7 +4,7 @@ This guide is written for the person (or team) who will actually deploy this
 wrapper and take a Langdock agent from "works locally" to "listed on
 Sokosumi and earning USDCx". In most cases that is **the client who owns
 the agent**, because several of the credentials (Langdock API key, selling
-wallet, Payment Service admin token) are sensitive and must not leave their
+wallet, payment API key) are sensitive and must not leave their
 infrastructure.
 
 If you are a contractor setting this up *for* a client, treat this document
@@ -19,8 +19,8 @@ first two.
 
 | Role | Responsibility |
 |------|---------------|
-| **Agent owner (client)** | Owns the Langdock agent, pays for the selling wallet, runs (or pays someone to run) the Masumi Payment Service node, deploys this wrapper, lists on Sokosumi, keeps the service healthy. |
-| **Wrapper operator** | The process/server that runs `npm start` and receives `/start_job` / `/status` traffic. Typically hosted in the same environment as the Payment Service. Same person as the client in most setups. |
+| **Agent owner (client)** | Owns the Langdock agent, pays for the selling wallet, configures Masumi SaaS / Payment Service credentials, deploys this wrapper, lists on Sokosumi, keeps the service healthy. |
+| **Wrapper operator** | The process/server that runs `npm start` and receives `/start_job` / `/status` traffic. Typically hosted close to the payment API. Same person as the client in most setups. |
 | **Buyer** | A Sokosumi user who pays in USDCx / tUSDM to invoke the agent. You do not manage buyers — Sokosumi does. |
 
 **Short answer to the original question:** yes, essentially everything is set
@@ -37,7 +37,7 @@ glue; it does not replace any of those components.
  │                          ONE-TIME SETUP                             │
  │                                                                     │
  │  (a) Client generates a Langdock API key + notes the agent ID.      │
- │  (b) Client spins up a Masumi Payment Service node                  │
+ │  (b) Client configures Masumi SaaS / Payment Service credentials     │
  │      (Docker or Railway template).                                  │
  │  (c) Client creates a SELLING wallet in the Payment Service admin,  │
  │      funds it with a few test ADA on Preprod.                       │
@@ -78,13 +78,11 @@ block the setup halfway through.
 - [ ] **`LANGDOCK_AGENT_ID`** — the target agent's ID.
 - [ ] Optional: a non-default `LANGDOCK_BASE_URL` if the client uses a custom deployment.
 
-### From Masumi (Payment Service)
-- [ ] A running **Masumi Payment Service** node. Options:
-  - Self-host via Docker: <https://github.com/masumi-network/masumi-payment-service>
-  - One-click Railway deploy (the template in that repo's README).
-- [ ] **`MASUMI_PAYMENT_SERVICE_URL`** — base URL of the node (without `/api/v1`; the wrapper strips it either way).
-- [ ] **`MASUMI_PAYMENT_SERVICE_TOKEN`** — admin `token` shown in the Payment Service UI. Treat like a root password.
-- [ ] **`MASUMI_NETWORK`** — `Preprod` for testing, `Mainnet` for production.
+### From Masumi (SaaS / Payment Service)
+- [ ] Masumi SaaS API access, or a running **Masumi Payment Service** node.
+- [ ] **`PAYMENT_SERVICE_URL`** — Masumi SaaS `/pay/api/v1` URL or direct Payment Service `/api/v1` URL.
+- [ ] **`PAYMENT_API_KEY`** — Masumi SaaS API key, or direct Payment Service token. Treat like a root password.
+- [ ] **`NETWORK`** — `Preprod` for testing, `Mainnet` for production.
 - [ ] A **selling wallet** created inside the Payment Service admin, funded with at least a few test ADA (Preprod faucet: <https://docs.cardano.org/cardano-testnets/tools/faucet>).
 - [ ] USDCx / tUSDM pricing selected. Sokosumi expects 6-decimal raw token units: `1000000` = 1 USDCx/tUSDM. The `unit` is the full token asset id, not `lovelace`.
 - [ ] **`SELLER_VKEY`** — the selling wallet's verification key, visible on the admin dashboard.
@@ -110,11 +108,11 @@ Follow the upstream Docker instructions. At the end you should have:
 - A login to the admin UI.
 - A selling wallet with its receiving address and verification key.
 
-Verify the node is healthy:
+Verify the payment API is reachable:
 
 ```bash
-curl -H "token: $MASUMI_PAYMENT_SERVICE_TOKEN" \
-     "$MASUMI_PAYMENT_SERVICE_URL/api/v1/health"
+curl -H "x-api-key: $PAYMENT_API_KEY" \
+     "$PAYMENT_SERVICE_URL/payment?network=$NETWORK"
 ```
 
 ### Step 2 — Fund the selling wallet (Preprod first)
@@ -125,7 +123,7 @@ submit-result transaction fee when a job completes.
 
 ### Step 3 — Register the agent on Masumi
 
-From the Payment Service admin UI (or via `POST /api/v1/registry/`):
+From the Masumi admin UI (or direct payment-node `POST /registry`):
 1. Select the selling wallet.
 2. Provide the agent metadata (name, description, pricing reference, endpoint URL where THIS wrapper will be publicly reachable).
 3. Submit. The registry call mints an NFT that represents the agent.
@@ -161,20 +159,21 @@ SELLER_VKEY=2d457934ccaf239ee2629fe38bdae71b13f90b746fb174e5278bedd6
 # Payment mode
 PAYMENT_MODE=masumi
 
-# Payment Service
-MASUMI_PAYMENT_SERVICE_URL=https://masumi-payment.example.com
-MASUMI_PAYMENT_SERVICE_TOKEN=masumi-payment-admin-xxxxxxxx
-MASUMI_NETWORK=Preprod
-MASUMI_PAYMENT_TYPE=Web3CardanoV1
+# Masumi SaaS / Payment Service
+PAYMENT_SERVICE_URL=https://masumi-saas.example.com/pay/api/v1
+PAYMENT_API_KEY=masumi-saas-api-key-xxxxxxxx
+NETWORK=Preprod
+PAYMENT_API_AUTH_HEADER=x-api-key
 PAYMENT_POLL_INTERVAL_MS=5000
 PAYMENT_POLL_TIMEOUT_MS=1800000
 
-# Pricing — 1 tUSDM per call on Preprod.
+# Optional dynamic RequestedFunds — leave empty for fixed pricing configured
+# on the registered Masumi agent in the admin side.
 # Do not use "lovelace" for tUSDM/USDCx. Lovelace is ADA's smallest unit;
 # stablecoin pricing uses the token asset id as unit and a 6-decimal raw amount.
 # Mainnet USDCx unit:
 # 1f3aec8bfe7ea4fe14c5f121e2a92e301afe414147860d557cac7e345553444378
-PRICE_AMOUNTS=[{"amount":"1000000","unit":"16a55b2a349361ff88c03788f93e1e966e5d689605d044fef722ddde0014df10745553444d"}]
+PRICE_AMOUNTS=
 
 # Payment windows (Unix seconds, monotonic; ≥5 min between payBy and submitResult)
 PAY_BY_OFFSET_SEC=900
@@ -263,9 +262,9 @@ logs + the Payment Service dashboard for traffic.
 When Preprod is solid:
 - Fund the Mainnet selling wallet with real ADA for transaction fees.
 - Register the agent on Mainnet (new `AGENT_IDENTIFIER`).
-- Set `MASUMI_NETWORK=Mainnet`.
+- Set `NETWORK=Mainnet`.
 - Re-list on Sokosumi for Mainnet.
-- Update pricing (`PRICE_AMOUNTS`) to real-money values.
+- Update pricing in Masumi SaaS/admin. Set `PRICE_AMOUNTS` only for dynamic `RequestedFunds`.
 
 Never reuse a Preprod `AGENT_IDENTIFIER` on Mainnet.
 
@@ -277,7 +276,7 @@ Send them this exact list. Without these values you cannot finish the setup:
 
 1. Langdock API key (from their Langdock dashboard).
 2. Langdock agent ID.
-3. Payment Service URL + admin token *(or permission to spin one up on their infra)*.
+3. Payment API URL + API key *(Masumi SaaS preferred; direct payment-node is also supported)*.
 4. Selling wallet creation approval *(and who will fund it)*.
 5. `AGENT_IDENTIFIER` + `SELLER_VKEY` once the agent is registered.
 6. Final pricing they want to charge.
@@ -298,11 +297,11 @@ deployment:
 
 | Setting | When to change |
 |---------|----------------|
-| `PRICE_AMOUNTS` | Every pricing update. Use the tUSDM asset id on Preprod and the USDCx asset id on Mainnet; do not use `lovelace` unless intentionally charging ADA outside the Sokosumi stablecoin flow. |
+| `PRICE_AMOUNTS` | Optional dynamic pricing only. Use the tUSDM asset id on Preprod and the USDCx asset id on Mainnet; do not use `lovelace` unless intentionally charging ADA outside the Sokosumi stablecoin flow. |
 | `PAY_BY_OFFSET_SEC` / `SUBMIT_RESULT_OFFSET_SEC` / `UNLOCK_OFFSET_SEC` / `EXTERNAL_DISPUTE_UNLOCK_OFFSET_SEC` | When the agent takes significantly longer than the defaults (45 min median). Must stay monotonic with ≥5 min gap between payBy and submitResult. |
 | `PAYMENT_POLL_INTERVAL_MS` / `PAYMENT_POLL_TIMEOUT_MS` | If Cardano block times are slow or if buyers regularly pay right at the deadline. |
 | `INPUT_SCHEMA_JSON` | Whenever the Langdock agent expects a different input shape. The schema drives the Sokosumi form. |
-| `MASUMI_NETWORK` | Preprod during testing, Mainnet when live. |
+| `NETWORK` | Preprod during testing, Mainnet when live. |
 
 ---
 
@@ -356,7 +355,7 @@ works identically.
 - **Single replica** is safe today (in-memory job store). For HA, implement a persistent store — every other component is already stateless.
 - **Observability**: Fastify logger is on. Add Prometheus + tracing before production load.
 - **Secrets**: never commit `.env`. Use your host's secret manager (Railway Variables, AWS Secrets Manager, etc.).
-- **Rotation**: if `MASUMI_PAYMENT_SERVICE_TOKEN` is exposed, rotate it in the Payment Service and redeploy the wrapper. No state is stored client-side.
+- **Rotation**: if `PAYMENT_API_KEY` is exposed, rotate it in Masumi SaaS / Payment Service and redeploy the wrapper. No state is stored client-side.
 - **Upgrades**: when Masumi ships MIP-003 / MIP-004 changes, bump this repo and re-run `npm test` — the vitest suite covers the hashing + payment contract.
 
 ---
@@ -368,15 +367,15 @@ Use this when delivering a ready-to-run deployment to your client:
 ```
 [ ] Langdock API key set and tested
 [ ] Langdock agent ID confirmed
-[ ] Masumi Payment Service running, reachable from wrapper
-[ ] Payment Service admin token stored securely
+[ ] Masumi SaaS / Payment Service reachable from wrapper
+[ ] PAYMENT_API_KEY stored securely
 [ ] Selling wallet created and funded (Preprod AND Mainnet if going live)
 [ ] Agent registered on Masumi, AGENT_IDENTIFIER saved
 [ ] SELLER_VKEY saved
 [ ] .env configured with all of the above
 [ ] `npm run check:production` passes
 [ ] INPUT_SCHEMA_JSON matches the agent's real input fields
-[ ] PRICE_AMOUNTS set to the agreed-upon price
+[ ] Pricing configured on the registered Masumi agent; PRICE_AMOUNTS empty unless using dynamic RequestedFunds
 [ ] Preprod end-to-end buy→unlock cycle executed successfully
 [ ] Wrapper deployed with public HTTPS URL
 [ ] Sokosumi listing submitted + approved

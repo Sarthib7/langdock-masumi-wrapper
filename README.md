@@ -21,16 +21,17 @@ See [STATUS.md](STATUS.md) for the full production-readiness checklist.
 ## Architecture
 
 ```
-┌──────────┐  POST /start_job  ┌────────────────────┐  POST /api/v1/payment/      ┌────────────────────────┐
-│  Buyer   │ ────────────────▶ │ Wrapper (this app) │ ──────────────────────────▶ │ Masumi Payment Service │
-└──────────┘                   │                    │ ◀── blockchainIdentifier ── │   (self-hosted node)   │
+┌──────────┐  POST /start_job  ┌────────────────────┐  POST /payment              ┌────────────────────────┐
+│  Buyer   │ ────────────────▶ │ Wrapper (this app) │ ──────────────────────────▶ │ Masumi SaaS / Payment  │
+└──────────┘                   │                    │ ◀── blockchainIdentifier ── │        Service         │
                                │   poller loop      │                             └─────────┬──────────────┘
-                               │                    │ GET  /api/v1/payment/                 │ on-chain escrow
+                               │                    │ POST /payment/resolve-                │ on-chain escrow
+                               │                    │      blockchain-identifier            │
                                │   FundsLocked?     │ ──────────────────────────▶            ▼
                                │                    │                             ┌────────────────────────┐
                                │   run handler      │                             │   Cardano Preprod /    │
                                │   compute hash     │                             │        Mainnet         │
-                               │                    │ POST /api/v1/payment/       └────────────────────────┘
+                               │                    │ POST /payment/             └────────────────────────┘
                                │                    │      submit-result
                                └────────────────────┘
                                         │
@@ -58,10 +59,11 @@ cp .env.example .env
 | `AGENT_IDENTIFIER` | Masumi NFT-backed agent identifier (from the Payment Service registry). |
 | `SELLER_VKEY` | Selling wallet verification key (from the Payment Service admin UI). |
 | `PAYMENT_MODE` | `masumi` (default when URL is set — production) or `direct` (local dev, skips escrow). |
-| `MASUMI_PAYMENT_SERVICE_URL` | Base URL of your Masumi node. Trailing `/api/v1` is stripped automatically. |
-| `MASUMI_PAYMENT_SERVICE_TOKEN` | Admin `token` from the Payment Service. |
-| `MASUMI_NETWORK` | `Preprod` or `Mainnet`. |
-| `PRICE_AMOUNTS` | JSON array of `{amount, unit}`. Sokosumi expects USDCx/tUSDM raw token amounts with 6 decimals; `unit` is the token asset id, not `lovelace`. |
+| `PAYMENT_SERVICE_URL` | API base URL. Use Masumi SaaS `/pay/api/v1` or direct payment-node `/api/v1`. |
+| `PAYMENT_API_KEY` | Masumi SaaS API key or direct Payment Service token. |
+| `PAYMENT_API_AUTH_HEADER` | Optional override: `x-api-key` for SaaS, `token` for direct node. Auto-detected from the URL. |
+| `NETWORK` | `Preprod` or `Mainnet`. |
+| `PRICE_AMOUNTS` | Optional dynamic `RequestedFunds` JSON array. Leave empty for fixed pricing configured in Masumi SaaS/admin. |
 | `INPUT_SCHEMA_PATH` / `INPUT_SCHEMA_JSON` | MIP-003 schema served at `/input_schema`. |
 | `REQUIRE_PRODUCTION_CONFIG` | Set `true` to make startup fail until production env is complete. Also enforced automatically when `NODE_ENV=production` or `PAYMENT_MODE=masumi`. |
 
@@ -76,8 +78,8 @@ curl -s http://localhost:3000/ready
 ```
 
 The check fails on missing Langdock credentials, missing Masumi identity/payment
-credentials in `masumi` mode, invalid payment windows, invalid pricing, or an
-empty/duplicate input schema.
+credentials in `masumi` mode, invalid payment windows, invalid dynamic pricing,
+or an empty/duplicate input schema.
 
 ## Handlers
 
@@ -132,8 +134,10 @@ auto-generated.
   poller waits for `FundsLocked`, runs the handler, and submits the MIP-004 output hash
   back to the Payment Service.
 
-Mode auto-detection: if `MASUMI_PAYMENT_SERVICE_URL` is set, `masumi` is the default;
-otherwise `direct`. Override explicitly with `PAYMENT_MODE=...`.
+Mode auto-detection: if `PAYMENT_SERVICE_URL` is set, `masumi` is the default;
+otherwise `direct`. `MASUMI_PAYMENT_SERVICE_URL`, `MASUMI_PAYMENT_SERVICE_TOKEN`,
+and `MASUMI_NETWORK` remain supported as legacy aliases. Override explicitly with
+`PAYMENT_MODE=...`.
 
 ## Scripts
 

@@ -1,15 +1,21 @@
 /**
- * HTTP client for a self-hosted Masumi Payment Service node.
+ * HTTP client for Masumi payment APIs.
  *
  * Endpoints used:
- *   POST /api/v1/payment/            — register a sale (seller side)
- *   GET  /api/v1/payment/            — read payment status
- *   POST /api/v1/payment/submit-result — submit MIP-004 output hash
+ *   POST /payment                               — register a sale (seller side)
+ *   POST /payment/resolve-blockchain-identifier — read payment status
+ *   POST /payment/submit-result                 — submit MIP-004 output hash
  *
- * Auth uses the admin `token` header configured on the Payment Service node.
+ * Configure baseUrl as the API prefix, for example:
+ *   - Masumi SaaS: https://app.example.com/pay/api/v1 with x-api-key auth
+ *   - Payment node: https://node.example.com/api/v1 with token auth
  */
 
-import type { MasumiNetwork, PriceAmount } from "../config.js";
+import type {
+  MasumiNetwork,
+  PaymentApiAuthHeader,
+  PriceAmount,
+} from "../config.js";
 
 export type PaymentOnchainState =
   | "FundsLocked"
@@ -37,9 +43,9 @@ export class MasumiPaymentError extends Error {
 
 export type MasumiPaymentClientConfig = {
   baseUrl: string;
-  token: string;
+  apiKey: string;
+  authHeader: PaymentApiAuthHeader;
   network: MasumiNetwork;
-  paymentType: string;
 };
 
 export type RegisterSaleArgs = {
@@ -50,7 +56,7 @@ export type RegisterSaleArgs = {
   submitResultTime: number;
   unlockTime: number;
   externalDisputeUnlockTime: number;
-  amounts: PriceAmount[];
+  requestedFunds?: PriceAmount[];
 };
 
 export type RegisterSaleResult = {
@@ -69,21 +75,21 @@ export type PaymentStatus = {
 
 export class MasumiPaymentClient {
   private readonly baseUrl: string;
-  private readonly token: string;
+  private readonly apiKey: string;
+  private readonly authHeader: PaymentApiAuthHeader;
   private readonly network: MasumiNetwork;
-  private readonly paymentType: string;
 
   constructor(config: MasumiPaymentClientConfig) {
     if (!config.baseUrl) {
-      throw new Error("MASUMI_PAYMENT_SERVICE_URL is required");
+      throw new Error("PAYMENT_SERVICE_URL is required");
     }
-    if (!config.token) {
-      throw new Error("MASUMI_PAYMENT_SERVICE_TOKEN is required");
+    if (!config.apiKey) {
+      throw new Error("PAYMENT_API_KEY is required");
     }
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
-    this.token = config.token;
+    this.apiKey = config.apiKey;
+    this.authHeader = config.authHeader;
     this.network = config.network;
-    this.paymentType = config.paymentType;
   }
 
   private async request<T = unknown>(
@@ -106,7 +112,7 @@ export class MasumiPaymentClient {
     const res = await fetch(url, {
       method,
       headers: {
-        token: this.token,
+        [this.authHeader]: this.apiKey,
         "Content-Type": "application/json",
         Accept: "application/json",
       },
@@ -129,7 +135,7 @@ export class MasumiPaymentClient {
     return json as T;
   }
 
-  /** POST /api/v1/payment/ — registers a sale and returns `blockchainIdentifier` + timings.
+  /** POST /payment — registers a sale and returns `blockchainIdentifier` + timings.
    *
    * Time fields are submitted as ISO-8601 datetime strings (with offset) per the Payment
    * Service zod schema; `RegisterSaleArgs` uses Unix seconds (matching MIP-003 response
@@ -140,7 +146,6 @@ export class MasumiPaymentClient {
       new Date(unixSeconds * 1000).toISOString();
     const body = {
       network: this.network,
-      paymentType: this.paymentType,
       agentIdentifier: args.agentIdentifier,
       inputHash: args.inputHash,
       identifierFromPurchaser: args.identifierFromPurchaser,
@@ -148,12 +153,14 @@ export class MasumiPaymentClient {
       submitResultTime: toIso(args.submitResultTime),
       unlockTime: toIso(args.unlockTime),
       externalDisputeUnlockTime: toIso(args.externalDisputeUnlockTime),
-      amounts: args.amounts,
+      ...(args.requestedFunds?.length
+        ? { RequestedFunds: args.requestedFunds }
+        : {}),
     };
 
     const resp = await this.request<{ data?: Record<string, unknown> } | Record<string, unknown>>(
       "POST",
-      "/api/v1/payment/",
+      "/payment",
       { body },
     );
 
@@ -198,14 +205,18 @@ export class MasumiPaymentClient {
     };
   }
 
-  /** GET /api/v1/payment/ — returns current on-chain state for one sale. */
+  /** POST /payment/resolve-blockchain-identifier — returns current state for one sale. */
   async getPaymentStatus(blockchainIdentifier: string): Promise<PaymentStatus> {
-    const resp = await this.request<Record<string, unknown>>("GET", "/api/v1/payment/", {
-      query: {
-        network: this.network,
-        blockchainIdentifier,
+    const resp = await this.request<Record<string, unknown>>(
+      "POST",
+      "/payment/resolve-blockchain-identifier",
+      {
+        body: {
+          network: this.network,
+          blockchainIdentifier,
+        },
       },
-    });
+    );
 
     const data = ((resp as { data?: unknown }).data ?? resp) as
       | Record<string, unknown>
@@ -244,7 +255,7 @@ export class MasumiPaymentClient {
     return { onChainState, raw: entry ?? {} };
   }
 
-  /** POST /api/v1/payment/submit-result — submits MIP-004 output hash on-chain. */
+  /** POST /payment/submit-result — submits MIP-004 output hash on-chain. */
   async submitResult(args: {
     blockchainIdentifier: string;
     submitResultHash: string;
@@ -256,7 +267,7 @@ export class MasumiPaymentClient {
     };
     const resp = await this.request<Record<string, unknown>>(
       "POST",
-      "/api/v1/payment/submit-result",
+      "/payment/submit-result",
       { body },
     );
     return resp;

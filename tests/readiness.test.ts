@@ -17,8 +17,12 @@ function resetEnv(): void {
   delete process.env.PAYMENT_MODE;
   delete process.env.LANGDOCK_API_KEY;
   delete process.env.LANGDOCK_AGENT_ID;
+  delete process.env.PAYMENT_SERVICE_URL;
+  delete process.env.PAYMENT_API_KEY;
+  delete process.env.NETWORK;
   delete process.env.MASUMI_PAYMENT_SERVICE_URL;
   delete process.env.MASUMI_PAYMENT_SERVICE_TOKEN;
+  delete process.env.MASUMI_NETWORK;
   delete process.env.AGENT_IDENTIFIER;
   delete process.env.SELLER_VKEY;
   delete process.env.PRICE_AMOUNTS;
@@ -75,22 +79,42 @@ describe("getReadinessReport", () => {
       expect.arrayContaining([
         "AGENT_IDENTIFIER",
         "SELLER_VKEY",
-        "MASUMI_PAYMENT_SERVICE_URL",
-        "MASUMI_PAYMENT_SERVICE_TOKEN",
+        "PAYMENT_SERVICE_URL",
+        "PAYMENT_API_KEY",
       ]),
     );
+  });
+
+  it("keeps the configured SaaS base URL and auto-selects x-api-key auth", () => {
+    resetEnv();
+    process.env.PAYMENT_SERVICE_URL = "https://saas.example.com/pay/api/v1";
+
+    const config = loadConfig();
+    expect(config.paymentMode).toBe("masumi");
+    expect(config.paymentServiceUrl).toBe("https://saas.example.com/pay/api/v1");
+    expect(config.paymentApiAuthHeader).toBe("x-api-key");
+  });
+
+  it("keeps the configured payment-node base URL and defaults to token auth", () => {
+    resetEnv();
+    process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
+
+    const config = loadConfig();
+    expect(config.paymentMode).toBe("masumi");
+    expect(config.paymentServiceUrl).toBe("https://payment.example.com/api/v1");
+    expect(config.paymentApiAuthHeader).toBe("token");
   });
 
   it("accepts USDCx as the expected mainnet settlement token", () => {
     resetEnv();
     process.env.PAYMENT_MODE = "masumi";
-    process.env.MASUMI_NETWORK = "Mainnet";
+    process.env.NETWORK = "Mainnet";
     process.env.LANGDOCK_API_KEY = "ld-key";
     process.env.LANGDOCK_AGENT_ID = "agent-id";
     process.env.AGENT_IDENTIFIER = "agent-id-on-chain";
     process.env.SELLER_VKEY = "seller-vkey";
-    process.env.MASUMI_PAYMENT_SERVICE_URL = "https://payment.example.com";
-    process.env.MASUMI_PAYMENT_SERVICE_TOKEN = "payment-token";
+    process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
+    process.env.PAYMENT_API_KEY = "payment-token";
     process.env.PRICE_AMOUNTS = JSON.stringify([
       { amount: "1000000", unit: MAINNET_USDCX_UNIT },
     ]);
@@ -105,13 +129,13 @@ describe("getReadinessReport", () => {
   it("warns when mainnet pricing is not USDCx", () => {
     resetEnv();
     process.env.PAYMENT_MODE = "masumi";
-    process.env.MASUMI_NETWORK = "Mainnet";
+    process.env.NETWORK = "Mainnet";
     process.env.LANGDOCK_API_KEY = "ld-key";
     process.env.LANGDOCK_AGENT_ID = "agent-id";
     process.env.AGENT_IDENTIFIER = "agent-id-on-chain";
     process.env.SELLER_VKEY = "seller-vkey";
-    process.env.MASUMI_PAYMENT_SERVICE_URL = "https://payment.example.com";
-    process.env.MASUMI_PAYMENT_SERVICE_TOKEN = "payment-token";
+    process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
+    process.env.PAYMENT_API_KEY = "payment-token";
     process.env.PRICE_AMOUNTS = JSON.stringify([
       { amount: "1000000", unit: PREPROD_TUSDM_UNIT },
     ]);
@@ -130,13 +154,13 @@ describe("getReadinessReport", () => {
   it("warns when Preprod pricing uses lovelace instead of the tUSDM asset id", () => {
     resetEnv();
     process.env.PAYMENT_MODE = "masumi";
-    process.env.MASUMI_NETWORK = "Preprod";
+    process.env.NETWORK = "Preprod";
     process.env.LANGDOCK_API_KEY = "ld-key";
     process.env.LANGDOCK_AGENT_ID = "agent-id";
     process.env.AGENT_IDENTIFIER = "agent-id-on-chain";
     process.env.SELLER_VKEY = "seller-vkey";
-    process.env.MASUMI_PAYMENT_SERVICE_URL = "https://payment.example.com";
-    process.env.MASUMI_PAYMENT_SERVICE_TOKEN = "payment-token";
+    process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
+    process.env.PAYMENT_API_KEY = "payment-token";
     process.env.PRICE_AMOUNTS = JSON.stringify([
       { amount: "1000000", unit: "lovelace" },
     ]);

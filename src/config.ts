@@ -4,10 +4,10 @@
  */
 
 import { readFileSync } from "node:fs";
-import { PREPROD_TUSDM_UNIT } from "./services/sokosumiTokens.js";
 
 export type PaymentMode = "masumi" | "direct";
 export type MasumiNetwork = "Preprod" | "Mainnet";
+export type PaymentApiAuthHeader = "token" | "x-api-key";
 
 export type InputSchemaField = {
   id: string;
@@ -32,10 +32,14 @@ export type AppConfig = {
   sellerVKey: string;
 
   paymentMode: PaymentMode;
+  paymentServiceUrl: string;
+  paymentApiKey: string;
+  paymentApiAuthHeader: PaymentApiAuthHeader;
+  /** Deprecated alias; use paymentServiceUrl / PAYMENT_SERVICE_URL. */
   masumiPaymentServiceUrl: string;
+  /** Deprecated alias; use paymentApiKey / PAYMENT_API_KEY. */
   masumiPaymentServiceToken: string;
   masumiNetwork: MasumiNetwork;
-  masumiPaymentType: string;
   paymentPollIntervalMs: number;
   paymentPollTimeoutMs: number;
 
@@ -69,7 +73,7 @@ function parseNetwork(raw: string | undefined): MasumiNetwork {
 
 function parsePriceAmounts(raw: string | undefined): PriceAmount[] {
   if (!raw || !raw.trim()) {
-    return [{ amount: "1000000", unit: PREPROD_TUSDM_UNIT }];
+    return [];
   }
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -93,7 +97,19 @@ function parsePriceAmounts(raw: string | undefined): PriceAmount[] {
   } catch {
     // fall through
   }
-  return [{ amount: "1000000", unit: PREPROD_TUSDM_UNIT }];
+  return [];
+}
+
+function parsePaymentApiAuthHeader(
+  raw: string | undefined,
+  paymentServiceUrl: string,
+): PaymentApiAuthHeader {
+  const normalized = (raw ?? "").trim().toLowerCase();
+  if (normalized === "x-api-key") return "x-api-key";
+  if (normalized === "token") return "token";
+  return paymentServiceUrl.toLowerCase().includes("/pay/api/v1")
+    ? "x-api-key"
+    : "token";
 }
 
 function loadInputSchema(): InputSchemaField[] {
@@ -151,17 +167,25 @@ export function resolveAgentDisplayIdentity(config: AppConfig): {
 }
 
 export function loadConfig(): AppConfig {
-  const masumiPaymentServiceUrl = strEnv("MASUMI_PAYMENT_SERVICE_URL")
-    .replace(/\/$/, "")
-    // Accept URLs with or without the `/api/v1` suffix; the client appends paths itself.
-    .replace(/\/api\/v1$/, "");
+  const paymentServiceUrl = strEnv(
+    "PAYMENT_SERVICE_URL",
+    strEnv("MASUMI_PAYMENT_SERVICE_URL"),
+  ).replace(/\/$/, "");
+  const paymentApiKey = strEnv(
+    "PAYMENT_API_KEY",
+    strEnv("MASUMI_PAYMENT_SERVICE_TOKEN"),
+  );
+  const paymentApiAuthHeader = parsePaymentApiAuthHeader(
+    process.env.PAYMENT_API_AUTH_HEADER,
+    paymentServiceUrl,
+  );
   const explicitMode = strEnv("PAYMENT_MODE").toLowerCase();
   const paymentMode: PaymentMode =
     explicitMode === "masumi"
       ? "masumi"
       : explicitMode === "direct"
         ? "direct"
-        : masumiPaymentServiceUrl
+        : paymentServiceUrl
           ? "masumi"
           : "direct";
 
@@ -178,10 +202,12 @@ export function loadConfig(): AppConfig {
     sellerVKey: strEnv("SELLER_VKEY"),
 
     paymentMode,
-    masumiPaymentServiceUrl,
-    masumiPaymentServiceToken: strEnv("MASUMI_PAYMENT_SERVICE_TOKEN"),
-    masumiNetwork: parseNetwork(process.env.MASUMI_NETWORK),
-    masumiPaymentType: strEnv("MASUMI_PAYMENT_TYPE", "Web3CardanoV1"),
+    paymentServiceUrl,
+    paymentApiKey,
+    paymentApiAuthHeader,
+    masumiPaymentServiceUrl: paymentServiceUrl,
+    masumiPaymentServiceToken: paymentApiKey,
+    masumiNetwork: parseNetwork(process.env.NETWORK ?? process.env.MASUMI_NETWORK),
     paymentPollIntervalMs: numEnv("PAYMENT_POLL_INTERVAL_MS", 5000),
     paymentPollTimeoutMs: numEnv("PAYMENT_POLL_TIMEOUT_MS", 30 * 60 * 1000),
 

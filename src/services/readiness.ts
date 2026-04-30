@@ -115,12 +115,6 @@ function validatePriceAmounts(
   issues: ReadinessIssue[],
 ): void {
   if (amounts.length === 0) {
-    issues.push({
-      severity: "error",
-      code: "missing_price",
-      env: ["PRICE_AMOUNTS"],
-      message: "PRICE_AMOUNTS must contain at least one payment amount.",
-    });
     return;
   }
 
@@ -205,16 +199,15 @@ export function productionRequiredEnv(config: AppConfig): string[] {
     "LANGDOCK_API_KEY",
     "LANGDOCK_AGENT_ID",
     "PAYMENT_MODE",
-    "PRICE_AMOUNTS",
     "INPUT_SCHEMA_JSON or INPUT_SCHEMA_PATH",
   ];
   if (config.paymentMode === "masumi") {
     required.push(
       "AGENT_IDENTIFIER",
       "SELLER_VKEY",
-      "MASUMI_PAYMENT_SERVICE_URL",
-      "MASUMI_PAYMENT_SERVICE_TOKEN",
-      "MASUMI_NETWORK",
+      "PAYMENT_SERVICE_URL",
+      "PAYMENT_API_KEY",
+      "NETWORK",
     );
   }
   return required;
@@ -270,25 +263,25 @@ export function getReadinessReport(config: AppConfig): ReadinessReport {
         "Masumi mode requires the selling wallet verification key.",
       );
     }
-    if (!hasValue(config.masumiPaymentServiceUrl)) {
+    if (!hasValue(config.paymentServiceUrl)) {
       pushMissing(
         issues,
-        ["MASUMI_PAYMENT_SERVICE_URL"],
-        "Masumi mode requires a reachable Payment Service base URL.",
+        ["PAYMENT_SERVICE_URL"],
+        "Masumi mode requires a reachable Payment Service or Masumi SaaS API base URL.",
       );
-    } else if (!isHttpUrl(config.masumiPaymentServiceUrl)) {
+    } else if (!isHttpUrl(config.paymentServiceUrl)) {
       issues.push({
         severity: "error",
         code: "invalid_url",
-        env: ["MASUMI_PAYMENT_SERVICE_URL"],
-        message: "MASUMI_PAYMENT_SERVICE_URL must be an http(s) URL.",
+        env: ["PAYMENT_SERVICE_URL"],
+        message: "PAYMENT_SERVICE_URL must be an http(s) URL.",
       });
     }
-    if (!hasValue(config.masumiPaymentServiceToken)) {
+    if (!hasValue(config.paymentApiKey)) {
       pushMissing(
         issues,
-        ["MASUMI_PAYMENT_SERVICE_TOKEN"],
-        "Masumi mode requires a Payment Service API token.",
+        ["PAYMENT_API_KEY"],
+        "Masumi mode requires a Payment Service token or Masumi SaaS API key.",
       );
     }
   }
@@ -308,7 +301,11 @@ export function getReadinessReport(config: AppConfig): ReadinessReport {
       "LANGDOCK_BASE_URL",
       "PAYMENT_POLL_INTERVAL_MS",
       "PAYMENT_POLL_TIMEOUT_MS",
-      "MASUMI_PAYMENT_TYPE",
+      "PAYMENT_API_AUTH_HEADER",
+      "PRICE_AMOUNTS",
+      "MASUMI_PAYMENT_SERVICE_URL (legacy alias)",
+      "MASUMI_PAYMENT_SERVICE_TOKEN (legacy alias)",
+      "MASUMI_NETWORK (legacy alias)",
     ],
   };
 }

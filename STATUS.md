@@ -8,7 +8,7 @@ Sokosumi marketplace listing requirements.
 
 | Area | Status | Notes |
 |------|:------:|-------|
-| MIP-003 `/start_job` | Done | Registers a sale, returns `blockchainIdentifier`, `agentIdentifier`, `sellerVKey`, `input_hash`, `payByTime`, `submitResultTime`, `unlockTime`, `externalDisputeUnlockTime`, `status`, `amounts`. |
+| MIP-003 `/start_job` | Done | Registers a sale, returns `blockchainIdentifier`, `agentIdentifier`, `sellerVKey`, `input_hash`, `payByTime`, `submitResultTime`, `unlockTime`, `externalDisputeUnlockTime`, `status`, and optional dynamic `amounts`. |
 | MIP-003 `/status` | Done | Returns `job_id`, `status`, `result`/`output`, `input_hash`, `output_hash`, `blockchain_identifier`, ISO timestamps. |
 | MIP-003 `/availability` | Done | Returns `{status, type, message}`. Custom handler supported. |
 | Operator `/ready` | Done | Central readiness report for required Langdock/Masumi env, pricing, schema, and payment windows. |
@@ -66,20 +66,20 @@ Sokosumi marketplace listing requirements.
 ```
 /start_job
     └─▶ MasumiPaymentClient.registerSale
-            └─▶ POST /api/v1/payment/
+            └─▶ POST /payment
                 returns blockchainIdentifier + timings
 
    (HTTP 200 returned to buyer: status=awaiting_payment)
 
 Background poller (src/services/jobRunner.ts)
-    └─▶ GET /api/v1/payment/  every PAYMENT_POLL_INTERVAL_MS
+    └─▶ POST /payment/resolve-blockchain-identifier  every PAYMENT_POLL_INTERVAL_MS
          ├─ FundsLocked       → run handler
          ├─ RefundRequested / Disputed / Invalid → mark refunded
          └─ timeout (PAYMENT_POLL_TIMEOUT_MS)     → mark failed
 
 Handler resolves
     └─▶ computeOutputHash
-    └─▶ POST /api/v1/payment/submit-result
+    └─▶ POST /payment/submit-result
          └─ buyer can now unlock payment
 ```
 
@@ -88,12 +88,12 @@ Handler resolves
 1. **Register the agent on Masumi.** From the admin dashboard, create the selling wallet
    and call `POST /api/v1/registry/` to mint the agent NFT. Copy the resulting
    `agentIdentifier` and `sellerVKey` into `AGENT_IDENTIFIER` / `SELLER_VKEY`.
-2. **Set real pricing.** Update `PRICE_AMOUNTS` to the tUSDM / USDCx amount your client wants to charge. Sokosumi expects 6-decimal raw token amounts with the token asset id as `unit`, not `lovelace`.
+2. **Set real pricing in Masumi SaaS/admin.** Leave `PRICE_AMOUNTS` empty for fixed registered pricing; only set it when this wrapper must send dynamic `RequestedFunds`. Sokosumi expects 6-decimal raw token amounts with the token asset id as `unit`, not `lovelace`.
 3. **Provide a real `INPUT_SCHEMA_JSON`** that matches what the Langdock agent expects — this is
    what Sokosumi shows buyers.
 4. **Run the Masumi Payment Service node** alongside the wrapper (separate process, shared env).
 5. **Preprod dry run.** Fund the purchasing wallet via the faucet, execute a real end-to-end
-   buy → result → unlock cycle before switching `MASUMI_NETWORK` to `Mainnet`.
+   buy → result → unlock cycle before switching `NETWORK` to `Mainnet`.
 6. **Durable job store.** Current implementation is in-memory — fine for single-replica, but
    for HA swap `src/services/jobs.ts` for Redis or Postgres.
 7. **Optional: `/provide_input`** for agents that expose HITL steps.
@@ -119,10 +119,11 @@ curl http://localhost:3000/ready
 ```
 
 ```bash
-# Masumi mode — requires masumi-payment-service running on localhost:3001.
+# Masumi mode — use Masumi SaaS /pay/api/v1 or a direct payment-node /api/v1 URL.
 PAYMENT_MODE=masumi \
-MASUMI_PAYMENT_SERVICE_URL=http://localhost:3001 \
-MASUMI_PAYMENT_SERVICE_TOKEN=... \
+PAYMENT_SERVICE_URL=https://masumi-saas.example.com/pay/api/v1 \
+PAYMENT_API_KEY=... \
+NETWORK=Preprod \
 AGENT_IDENTIFIER=... \
 SELLER_VKEY=... \
 npm run dev

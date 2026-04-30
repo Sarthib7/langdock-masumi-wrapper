@@ -35,9 +35,9 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
     process.env.PAYMENT_MODE = "masumi";
     process.env.AGENT_IDENTIFIER = "agent-xyz";
     process.env.SELLER_VKEY = "addr_test1xyz";
-    process.env.MASUMI_PAYMENT_SERVICE_URL = "http://payment.test";
-    process.env.MASUMI_PAYMENT_SERVICE_TOKEN = "secret";
-    process.env.MASUMI_NETWORK = "Preprod";
+    process.env.PAYMENT_SERVICE_URL = "http://payment.test/api/v1";
+    process.env.PAYMENT_API_KEY = "secret";
+    process.env.NETWORK = "Preprod";
     process.env.PAYMENT_POLL_INTERVAL_MS = "10";
     process.env.PAYMENT_POLL_TIMEOUT_MS = "2000";
   });
@@ -48,9 +48,9 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
     delete process.env.PAYMENT_MODE;
     delete process.env.AGENT_IDENTIFIER;
     delete process.env.SELLER_VKEY;
-    delete process.env.MASUMI_PAYMENT_SERVICE_URL;
-    delete process.env.MASUMI_PAYMENT_SERVICE_TOKEN;
-    delete process.env.MASUMI_NETWORK;
+    delete process.env.PAYMENT_SERVICE_URL;
+    delete process.env.PAYMENT_API_KEY;
+    delete process.env.NETWORK;
     delete process.env.PAYMENT_POLL_INTERVAL_MS;
     delete process.env.PAYMENT_POLL_TIMEOUT_MS;
   });
@@ -64,58 +64,78 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
-        const method = init?.method ?? "GET";
-        const u = typeof url === "string" ? url : String(url);
+      vi.fn(
+        async (
+          url: string,
+          init?: {
+            method?: string;
+            body?: string;
+            headers?: Record<string, string>;
+          },
+        ) => {
+          const method = init?.method ?? "GET";
+          const u = typeof url === "string" ? url : String(url);
 
-        if (u.endsWith("/api/v1/payment/") && method === "POST") {
-          registerCalls += 1;
-          const body = JSON.parse(init!.body!);
-          expect(body.network).toBe("Preprod");
-          expect(body.agentIdentifier).toBe("agent-xyz");
-          expect(body.inputHash).toMatch(/^[0-9a-f]{64}$/);
-          return {
-            ok: true,
-            status: 200,
-            text: async () =>
-              JSON.stringify({
-                data: {
-                  blockchainIdentifier,
-                  payByTime: "1800000000",
-                  submitResultTime: "1800001000",
-                  unlockTime: "1800002000",
-                  externalDisputeUnlockTime: "1800003000",
-                },
-              }),
-          };
-        }
+          if (u.endsWith("/api/v1/payment") && method === "POST") {
+            registerCalls += 1;
+            expect(init?.headers?.token).toBe("secret");
+            const body = JSON.parse(init!.body!);
+            expect(body.network).toBe("Preprod");
+            expect(body.agentIdentifier).toBe("agent-xyz");
+            expect(body.inputHash).toMatch(/^[0-9a-f]{64}$/);
+            expect(body.paymentType).toBeUndefined();
+            expect(body.amounts).toBeUndefined();
+            return {
+              ok: true,
+              status: 200,
+              text: async () =>
+                JSON.stringify({
+                  data: {
+                    blockchainIdentifier,
+                    payByTime: "1800000000",
+                    submitResultTime: "1800001000",
+                    unlockTime: "1800002000",
+                    externalDisputeUnlockTime: "1800003000",
+                  },
+                }),
+            };
+          }
 
-        if (u.startsWith("http://payment.test/api/v1/payment/?") && method === "GET") {
-          statusCalls += 1;
-          // First two polls return "Initialized", then funds lock.
-          const state = statusCalls < 2 ? "Initialized" : "FundsLocked";
-          return {
-            ok: true,
-            status: 200,
-            text: async () =>
-              JSON.stringify({ data: { blockchainIdentifier, onChainState: state } }),
-          };
-        }
+          if (
+            u.endsWith("/api/v1/payment/resolve-blockchain-identifier") &&
+            method === "POST"
+          ) {
+            statusCalls += 1;
+            const body = JSON.parse(init!.body!);
+            expect(body.network).toBe("Preprod");
+            expect(body.blockchainIdentifier).toBe(blockchainIdentifier);
+            // First two polls return "Initialized", then funds lock.
+            const state = statusCalls < 2 ? "Initialized" : "FundsLocked";
+            return {
+              ok: true,
+              status: 200,
+              text: async () =>
+                JSON.stringify({
+                  data: { blockchainIdentifier, onChainState: state },
+                }),
+            };
+          }
 
-        if (u.endsWith("/api/v1/payment/submit-result") && method === "POST") {
-          submitResultCalls += 1;
-          const body = JSON.parse(init!.body!);
-          expect(body.blockchainIdentifier).toBe(blockchainIdentifier);
-          expect(body.submitResultHash).toMatch(/^[0-9a-f]{64}$/);
-          return {
-            ok: true,
-            status: 200,
-            text: async () => JSON.stringify({ data: { ok: true } }),
-          };
-        }
+          if (u.endsWith("/api/v1/payment/submit-result") && method === "POST") {
+            submitResultCalls += 1;
+            const body = JSON.parse(init!.body!);
+            expect(body.blockchainIdentifier).toBe(blockchainIdentifier);
+            expect(body.submitResultHash).toMatch(/^[0-9a-f]{64}$/);
+            return {
+              ok: true,
+              status: 200,
+              text: async () => JSON.stringify({ data: { ok: true } }),
+            };
+          }
 
-        throw new Error(`Unexpected fetch: ${method} ${u}`);
-      }) as unknown as typeof fetch,
+          throw new Error(`Unexpected fetch: ${method} ${u}`);
+        },
+      ) as unknown as typeof fetch,
     );
 
     const handler = new AgentEndpointHandler();
@@ -127,7 +147,7 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
       method: "POST",
       url: "/start_job",
       payload: {
-        identifier_from_purchaser: "buyer-1",
+        identifier_from_purchaser: "aabbccddeeff0011",
         input_data: [{ key: "text", value: "hello" }],
       },
     });
