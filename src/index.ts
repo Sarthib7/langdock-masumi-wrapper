@@ -41,6 +41,19 @@ export {
   computeOutputHash,
   stringifyForHash,
 } from "./services/hashing.js";
+export {
+  assertProductionReady,
+  getReadinessReport,
+  productionRequiredEnv,
+  shouldEnforceProductionReadiness,
+  type ReadinessIssue,
+  type ReadinessReport,
+  type ReadinessSeverity,
+} from "./services/readiness.js";
+export {
+  MAINNET_USDCX_UNIT,
+  PREPROD_TUSDM_UNIT,
+} from "./services/sokosumiTokens.js";
 export type {
   InputDataItem,
   JobRecord,

@@ -4,6 +4,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { PREPROD_TUSDM_UNIT } from "./services/sokosumiTokens.js";
 
 export type PaymentMode = "masumi" | "direct";
 export type MasumiNetwork = "Preprod" | "Mainnet";
@@ -68,7 +69,7 @@ function parseNetwork(raw: string | undefined): MasumiNetwork {
 
 function parsePriceAmounts(raw: string | undefined): PriceAmount[] {
   if (!raw || !raw.trim()) {
-    return [{ amount: "10000000", unit: "lovelace" }];
+    return [{ amount: "1000000", unit: PREPROD_TUSDM_UNIT }];
   }
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -92,7 +93,7 @@ function parsePriceAmounts(raw: string | undefined): PriceAmount[] {
   } catch {
     // fall through
   }
-  return [{ amount: "10000000", unit: "lovelace" }];
+  return [{ amount: "1000000", unit: PREPROD_TUSDM_UNIT }];
 }
 
 function loadInputSchema(): InputSchemaField[] {

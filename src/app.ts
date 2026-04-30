@@ -10,6 +10,7 @@ import { AgentEndpointHandler } from "./agentEndpointHandler.js";
 import { loadConfig } from "./config.js";
 import { registerRoutes } from "./routes/index.js";
 import { createLangdockStartJobHandler } from "./services/langdockStartJob.js";
+import { assertProductionReady } from "./services/readiness.js";
 
 export type BuildAppOptions = {
   /** When omitted, registers the default Langdock `start_job` handler. */
@@ -42,6 +43,7 @@ export async function buildApp(options?: BuildAppOptions): Promise<FastifyInstan
 /** Reads `PORT` from env and listens on all interfaces. */
 async function main(): Promise<void> {
   const config = loadConfig();
+  assertProductionReady(config);
   const app = await buildApp();
   await app.listen({ port: config.port, host: "0.0.0.0" });
 }
