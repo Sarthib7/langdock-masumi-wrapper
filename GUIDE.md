@@ -2,7 +2,7 @@
 
 This guide is written for the person (or team) who will actually deploy this
 wrapper and take a Langdock agent from "works locally" to "listed on
-Sokosumi and earning ADA / USDM". In most cases that is **the client who owns
+Sokosumi and earning USDCx". In most cases that is **the client who owns
 the agent**, because several of the credentials (Langdock API key, selling
 wallet, Payment Service admin token) are sensitive and must not leave their
 infrastructure.
@@ -21,7 +21,7 @@ first two.
 |------|---------------|
 | **Agent owner (client)** | Owns the Langdock agent, pays for the selling wallet, runs (or pays someone to run) the Masumi Payment Service node, deploys this wrapper, lists on Sokosumi, keeps the service healthy. |
 | **Wrapper operator** | The process/server that runs `npm start` and receives `/start_job` / `/status` traffic. Typically hosted in the same environment as the Payment Service. Same person as the client in most setups. |
-| **Buyer** | A Sokosumi user who pays in ADA / USDM to invoke the agent. You do not manage buyers — Sokosumi does. |
+| **Buyer** | A Sokosumi user who pays in USDCx / tUSDM to invoke the agent. You do not manage buyers — Sokosumi does. |
 
 **Short answer to the original question:** yes, essentially everything is set
 up by the client. They supply the Langdock credentials, run the Payment
@@ -56,7 +56,7 @@ glue; it does not replace any of those components.
  │     └─▶ Sokosumi calls POST /start_job on the wrapper               │
  │            └─▶ wrapper registers sale on Payment Service,           │
  │                returns blockchainIdentifier + timings.              │
- │  Buyer pays in ADA / USDM on-chain.                                 │
+ │  Buyer pays in USDCx / tUSDM on-chain.                              │
  │     └─▶ Payment Service transitions to FundsLocked.                 │
  │  Wrapper poller detects FundsLocked                                 │
  │     └─▶ Runs the Langdock handler.                                  │
@@ -86,6 +86,7 @@ block the setup halfway through.
 - [ ] **`MASUMI_PAYMENT_SERVICE_TOKEN`** — admin `token` shown in the Payment Service UI. Treat like a root password.
 - [ ] **`MASUMI_NETWORK`** — `Preprod` for testing, `Mainnet` for production.
 - [ ] A **selling wallet** created inside the Payment Service admin, funded with at least a few test ADA (Preprod faucet: <https://docs.cardano.org/cardano-testnets/tools/faucet>).
+- [ ] USDCx / tUSDM pricing selected. Sokosumi expects 6-decimal raw units: `1000000` = 1 USDCx/tUSDM.
 - [ ] **`SELLER_VKEY`** — the selling wallet's verification key, visible on the admin dashboard.
 - [ ] **`AGENT_IDENTIFIER`** — NFT-backed identifier obtained by registering the agent (see Step 4 below).
 
@@ -168,8 +169,10 @@ MASUMI_PAYMENT_TYPE=Web3CardanoV1
 PAYMENT_POLL_INTERVAL_MS=5000
 PAYMENT_POLL_TIMEOUT_MS=1800000
 
-# Pricing — 10 ADA per call by default
-PRICE_AMOUNTS=[{"amount":"10000000","unit":"lovelace"}]
+# Pricing — 1 tUSDM per call on Preprod.
+# Mainnet USDCx unit:
+# 1f3aec8bfe7ea4fe14c5f121e2a92e301afe414147860d557cac7e345553444378
+PRICE_AMOUNTS=[{"amount":"1000000","unit":"16a55b2a349361ff88c03788f93e1e966e5d689605d044fef722ddde0014df10745553444d"}]
 
 # Payment windows (Unix seconds, monotonic; ≥5 min between payBy and submitResult)
 PAY_BY_OFFSET_SEC=900
@@ -185,8 +188,9 @@ Sanity checks:
 
 ```bash
 npm install
-npm test                       # 18 tests should pass
+npm test
 npm run build
+npm run check:production       # fails if required production env is missing
 npm start                      # starts on $PORT
 ```
 
@@ -247,8 +251,10 @@ A minimal Dockerfile is already included.
    description, and the input schema fields (must match `INPUT_SCHEMA_JSON`).
 4. Submit and wait for marketplace review.
 
-Once approved, buyers can invoke your agent from Sokosumi. Monitor the
-wrapper's logs + the Payment Service dashboard for traffic.
+Once approved, buyers can invoke your agent from Sokosumi. The wrapper cannot
+force marketplace approval by itself; it makes the agent technically ready, and
+the Masumi/Sokosumi registration step makes it discoverable. Monitor the wrapper's
+logs + the Payment Service dashboard for traffic.
 
 ### Step 9 — Mainnet switchover
 
@@ -290,7 +296,7 @@ deployment:
 
 | Setting | When to change |
 |---------|----------------|
-| `PRICE_AMOUNTS` | Every pricing update. Supports multiple assets (ADA, USDM, custom native tokens). |
+| `PRICE_AMOUNTS` | Every pricing update. Use tUSDM on Preprod and USDCx on Mainnet for Sokosumi listings. |
 | `PAY_BY_OFFSET_SEC` / `SUBMIT_RESULT_OFFSET_SEC` / `UNLOCK_OFFSET_SEC` / `EXTERNAL_DISPUTE_UNLOCK_OFFSET_SEC` | When the agent takes significantly longer than the defaults (45 min median). Must stay monotonic with ≥5 min gap between payBy and submitResult. |
 | `PAYMENT_POLL_INTERVAL_MS` / `PAYMENT_POLL_TIMEOUT_MS` | If Cardano block times are slow or if buyers regularly pay right at the deadline. |
 | `INPUT_SCHEMA_JSON` | Whenever the Langdock agent expects a different input shape. The schema drives the Sokosumi form. |
@@ -337,6 +343,7 @@ works identically.
 | Job flips to `refunded` | Payment Service observed `RefundRequested` / `Disputed` / invalid datum | Check the Payment Service dashboard for the on-chain state. Usually means the buyer cancelled. |
 | Handler runs but `submit-result` 4xx | Selling wallet out of funds, or wrapper clock skewed past `submitResultTime` | Top up the selling wallet; ensure the host has NTP. Extend `SUBMIT_RESULT_OFFSET_SEC` if the agent is legitimately slow. |
 | Sokosumi cannot reach `/start_job` | Wrapper not publicly accessible, or TLS misconfigured | Verify `curl https://<public-url>/availability` returns 200 from an external host. |
+| `/ready` returns 503 | Required production env or schema/pricing is incomplete | Run `npm run build` then `npm run check:production`; fix every `error` entry before listing. |
 | `Langdock 401` in logs | `LANGDOCK_API_KEY` missing or expired | Rotate the key in Langdock; update the env. |
 | Jobs lost on restart | In-memory job store | Swap `src/services/jobs.ts` for a Redis / Postgres implementation before running >1 replica. |
 
@@ -365,6 +372,7 @@ Use this when delivering a ready-to-run deployment to your client:
 [ ] Agent registered on Masumi, AGENT_IDENTIFIER saved
 [ ] SELLER_VKEY saved
 [ ] .env configured with all of the above
+[ ] `npm run check:production` passes
 [ ] INPUT_SCHEMA_JSON matches the agent's real input fields
 [ ] PRICE_AMOUNTS set to the agreed-upon price
 [ ] Preprod end-to-end buy→unlock cycle executed successfully

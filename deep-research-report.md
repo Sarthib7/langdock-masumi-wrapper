@@ -392,7 +392,7 @@ Before client (agent provider) can use your wrapper, ensure:
 - **API Key:** They create a Langdock API key (Agent scope) and share their agent with it【16†L139-L147】.  
 - **Agent ID:** They provide you the Langdock `agentId` (from the URL in app.langdock.com).  
 - **Masumi Registration:** Their agent is registered on Masumi and has an `agentIdentifier`.  
-- **Payment Info:** Confirm their agent’s on-chain `sellerVKey` (from Masumi Registry), and which token (USDM) they accept (per network)【24†L71-L80】.  
+- **Payment Info:** Confirm their agent’s on-chain `sellerVKey` (from Masumi Registry), and which token they accept per network: USDCx on Mainnet, tUSDM on Preprod【24†L71-L80】.  
 - **Environment:** They give you (or you generate) the `sellerVKey`, agentIdentifier, and Masumi Node URL.  
 - **Schema:** They define the `input_schema` for your `/input_schema` endpoint (if needed) and ensure MIP-004 hashes will match their expectations.  
 

@@ -10,6 +10,7 @@ It implements:
 - `GET  /status`      — MIP-003 payload with `input_hash`, `output_hash`, result, timestamps.
 - `GET  /availability` — health for load balancers / marketplace checks.
 - `GET  /input_schema` — schema shown to buyers on Sokosumi.
+- `GET  /ready` — operator readiness report for missing production secrets/config.
 
 MIP-004 hashing (JCS + SHA-256) is applied to both `input_data` and the handler's output,
 and the output hash is submitted on-chain via the Payment Service so buyers can unlock
@@ -60,10 +61,23 @@ cp .env.example .env
 | `MASUMI_PAYMENT_SERVICE_URL` | Base URL of your Masumi node. Trailing `/api/v1` is stripped automatically. |
 | `MASUMI_PAYMENT_SERVICE_TOKEN` | Admin `token` from the Payment Service. |
 | `MASUMI_NETWORK` | `Preprod` or `Mainnet`. |
-| `PRICE_AMOUNTS` | JSON array of `{amount, unit}`. Default: 10 ADA. |
+| `PRICE_AMOUNTS` | JSON array of `{amount, unit}`. Sokosumi expects USDCx/tUSDM raw units with 6 decimals. |
 | `INPUT_SCHEMA_PATH` / `INPUT_SCHEMA_JSON` | MIP-003 schema served at `/input_schema`. |
+| `REQUIRE_PRODUCTION_CONFIG` | Set `true` to make startup fail until production env is complete. Also enforced automatically when `NODE_ENV=production` or `PAYMENT_MODE=masumi`. |
 
 Full list in [.env.example](.env.example).
+
+Before exposing the service publicly, build and run the readiness check:
+
+```bash
+npm run build
+npm run check:production
+curl -s http://localhost:3000/ready
+```
+
+The check fails on missing Langdock credentials, missing Masumi identity/payment
+credentials in `masumi` mode, invalid payment windows, invalid pricing, or an
+empty/duplicate input schema.
 
 ## Handlers
 
@@ -100,6 +114,7 @@ curl -s -X POST http://localhost:3000/start_job \
 curl -s "http://localhost:3000/status?job_id=JOB_UUID"
 curl -s http://localhost:3000/availability
 curl -s http://localhost:3000/input_schema
+curl -s http://localhost:3000/ready
 ```
 
 Field names in the request may be snake_case or camelCase
@@ -127,6 +142,7 @@ otherwise `direct`. Override explicitly with `PAYMENT_MODE=...`.
 | Develop | `npm run dev` |
 | Build | `npm run build` |
 | Run | `npm start` |
+| Production config check | `npm run check:production` |
 | Test | `npm test` |
 
 ## Spec compliance
@@ -151,6 +167,7 @@ src/
     hashing.ts                 MIP-004 input / output hashes
     inputMapping.ts            MIP-003 input_data → Langdock prompt text
     jobs.ts                    In-memory job store (swap for Redis/Postgres for HA)
+    readiness.ts               Central production config/readiness checks
   utils/
     startJobBody.ts            Request normalisation (MIP-003 array form + aliases)
   types/                       Typed payloads for MIP-003 and Langdock

@@ -11,6 +11,7 @@ Sokosumi marketplace listing requirements.
 | MIP-003 `/start_job` | Done | Registers a sale, returns `blockchainIdentifier`, `agentIdentifier`, `sellerVKey`, `input_hash`, `payByTime`, `submitResultTime`, `unlockTime`, `externalDisputeUnlockTime`, `status`, `amounts`. |
 | MIP-003 `/status` | Done | Returns `job_id`, `status`, `result`/`output`, `input_hash`, `output_hash`, `blockchain_identifier`, ISO timestamps. |
 | MIP-003 `/availability` | Done | Returns `{status, type, message}`. Custom handler supported. |
+| Operator `/ready` | Done | Central readiness report for required Langdock/Masumi env, pricing, schema, and payment windows. |
 | MIP-003 `/input_schema` | Done | Served from `INPUT_SCHEMA_PATH` / `INPUT_SCHEMA_JSON` or a default `text` field. |
 | MIP-003 `/provide_input` (HITL) | Not started | Out of scope for initial listing — add when an agent actually needs human-in-loop. |
 | MIP-004 input hashing | Done | JCS + SHA-256 over the canonical `{key, value}` array form. |
@@ -20,7 +21,7 @@ Sokosumi marketplace listing requirements.
 | Agent registration on Masumi | Manual | Operator still registers the agent via the Payment Service admin UI / API to obtain `AGENT_IDENTIFIER` + `SELLER_VKEY`. |
 | Sokosumi listing | Manual | Operator performs the listing once the registry transaction is confirmed. |
 | Dev ("direct") mode | Done | `PAYMENT_MODE=direct` bypasses Masumi for local iteration. |
-| Tests | Done | 18 tests, 4 suites — hashing, body normalisation, direct-mode flow, masumi-mode flow with mocked Payment Service. |
+| Tests | Done | Vitest suites cover hashing, body normalisation, direct-mode flow, masumi-mode flow with mocked Payment Service, and readiness validation. |
 
 ## MIP-003 Endpoint Checklist
 
@@ -48,6 +49,11 @@ Sokosumi marketplace listing requirements.
 - [x] Returns `{input_data: [...]}`.
 - [x] Configurable via `INPUT_SCHEMA_PATH` or `INPUT_SCHEMA_JSON`.
 - [x] Default schema exposes a single `text` string field.
+
+### `GET /ready` — [src/routes/readiness.ts](src/routes/readiness.ts)
+- [x] Returns 200 when production-critical config is ready.
+- [x] Returns 503 with structured issues when required env, pricing, schema, or payment windows are invalid.
+- [x] Uses the same validation module as startup enforcement and `npm run check:production`.
 
 ## MIP-004 Decision Logging
 
@@ -82,7 +88,7 @@ Handler resolves
 1. **Register the agent on Masumi.** From the admin dashboard, create the selling wallet
    and call `POST /api/v1/registry/` to mint the agent NFT. Copy the resulting
    `agentIdentifier` and `sellerVKey` into `AGENT_IDENTIFIER` / `SELLER_VKEY`.
-2. **Set real pricing.** Update `PRICE_AMOUNTS` to the USDM / ADA amount your client wants to charge.
+2. **Set real pricing.** Update `PRICE_AMOUNTS` to the tUSDM / USDCx amount your client wants to charge. Sokosumi expects 6-decimal raw token units.
 3. **Provide a real `INPUT_SCHEMA_JSON`** that matches what the Langdock agent expects — this is
    what Sokosumi shows buyers.
 4. **Run the Masumi Payment Service node** alongside the wrapper (separate process, shared env).
@@ -109,6 +115,7 @@ curl -X POST http://localhost:3000/start_job \
 curl "http://localhost:3000/status?job_id=<JOB_UUID>"
 curl http://localhost:3000/availability
 curl http://localhost:3000/input_schema
+curl http://localhost:3000/ready
 ```
 
 ```bash
