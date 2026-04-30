@@ -156,8 +156,8 @@ function validatePriceAmounts(
       env: ["PRICE_AMOUNTS"],
       message:
         network === "Mainnet"
-          ? "Sokosumi mainnet listings are expected to settle in USDCx."
-          : "Sokosumi Preprod listings are expected to settle in tUSDM.",
+          ? "Sokosumi mainnet listings are expected to settle in USDCx; use the full USDCx asset id as unit, not lovelace."
+          : "Sokosumi Preprod listings are expected to settle in tUSDM; use the full tUSDM asset id as unit, not lovelace.",
     });
   }
 }

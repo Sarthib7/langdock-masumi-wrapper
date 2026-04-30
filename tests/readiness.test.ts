@@ -121,7 +121,33 @@ describe("getReadinessReport", () => {
     expect(report.issues).toContainEqual(
       expect.objectContaining({
         code: "non_sokosumi_settlement_unit",
-        message: "Sokosumi mainnet listings are expected to settle in USDCx.",
+        message:
+          "Sokosumi mainnet listings are expected to settle in USDCx; use the full USDCx asset id as unit, not lovelace.",
+      }),
+    );
+  });
+
+  it("warns when Preprod pricing uses lovelace instead of the tUSDM asset id", () => {
+    resetEnv();
+    process.env.PAYMENT_MODE = "masumi";
+    process.env.MASUMI_NETWORK = "Preprod";
+    process.env.LANGDOCK_API_KEY = "ld-key";
+    process.env.LANGDOCK_AGENT_ID = "agent-id";
+    process.env.AGENT_IDENTIFIER = "agent-id-on-chain";
+    process.env.SELLER_VKEY = "seller-vkey";
+    process.env.MASUMI_PAYMENT_SERVICE_URL = "https://payment.example.com";
+    process.env.MASUMI_PAYMENT_SERVICE_TOKEN = "payment-token";
+    process.env.PRICE_AMOUNTS = JSON.stringify([
+      { amount: "1000000", unit: "lovelace" },
+    ]);
+
+    const report = getReadinessReport(loadConfig());
+    expect(report.status).toBe("ready");
+    expect(report.issues).toContainEqual(
+      expect.objectContaining({
+        code: "non_sokosumi_settlement_unit",
+        message:
+          "Sokosumi Preprod listings are expected to settle in tUSDM; use the full tUSDM asset id as unit, not lovelace.",
       }),
     );
   });

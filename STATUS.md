@@ -88,7 +88,7 @@ Handler resolves
 1. **Register the agent on Masumi.** From the admin dashboard, create the selling wallet
    and call `POST /api/v1/registry/` to mint the agent NFT. Copy the resulting
    `agentIdentifier` and `sellerVKey` into `AGENT_IDENTIFIER` / `SELLER_VKEY`.
-2. **Set real pricing.** Update `PRICE_AMOUNTS` to the tUSDM / USDCx amount your client wants to charge. Sokosumi expects 6-decimal raw token units.
+2. **Set real pricing.** Update `PRICE_AMOUNTS` to the tUSDM / USDCx amount your client wants to charge. Sokosumi expects 6-decimal raw token amounts with the token asset id as `unit`, not `lovelace`.
 3. **Provide a real `INPUT_SCHEMA_JSON`** that matches what the Langdock agent expects — this is
    what Sokosumi shows buyers.
 4. **Run the Masumi Payment Service node** alongside the wrapper (separate process, shared env).

@@ -61,7 +61,7 @@ cp .env.example .env
 | `MASUMI_PAYMENT_SERVICE_URL` | Base URL of your Masumi node. Trailing `/api/v1` is stripped automatically. |
 | `MASUMI_PAYMENT_SERVICE_TOKEN` | Admin `token` from the Payment Service. |
 | `MASUMI_NETWORK` | `Preprod` or `Mainnet`. |
-| `PRICE_AMOUNTS` | JSON array of `{amount, unit}`. Sokosumi expects USDCx/tUSDM raw units with 6 decimals. |
+| `PRICE_AMOUNTS` | JSON array of `{amount, unit}`. Sokosumi expects USDCx/tUSDM raw token amounts with 6 decimals; `unit` is the token asset id, not `lovelace`. |
 | `INPUT_SCHEMA_PATH` / `INPUT_SCHEMA_JSON` | MIP-003 schema served at `/input_schema`. |
 | `REQUIRE_PRODUCTION_CONFIG` | Set `true` to make startup fail until production env is complete. Also enforced automatically when `NODE_ENV=production` or `PAYMENT_MODE=masumi`. |
 

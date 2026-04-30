@@ -86,7 +86,7 @@ block the setup halfway through.
 - [ ] **`MASUMI_PAYMENT_SERVICE_TOKEN`** — admin `token` shown in the Payment Service UI. Treat like a root password.
 - [ ] **`MASUMI_NETWORK`** — `Preprod` for testing, `Mainnet` for production.
 - [ ] A **selling wallet** created inside the Payment Service admin, funded with at least a few test ADA (Preprod faucet: <https://docs.cardano.org/cardano-testnets/tools/faucet>).
-- [ ] USDCx / tUSDM pricing selected. Sokosumi expects 6-decimal raw units: `1000000` = 1 USDCx/tUSDM.
+- [ ] USDCx / tUSDM pricing selected. Sokosumi expects 6-decimal raw token units: `1000000` = 1 USDCx/tUSDM. The `unit` is the full token asset id, not `lovelace`.
 - [ ] **`SELLER_VKEY`** — the selling wallet's verification key, visible on the admin dashboard.
 - [ ] **`AGENT_IDENTIFIER`** — NFT-backed identifier obtained by registering the agent (see Step 4 below).
 
@@ -170,6 +170,8 @@ PAYMENT_POLL_INTERVAL_MS=5000
 PAYMENT_POLL_TIMEOUT_MS=1800000
 
 # Pricing — 1 tUSDM per call on Preprod.
+# Do not use "lovelace" for tUSDM/USDCx. Lovelace is ADA's smallest unit;
+# stablecoin pricing uses the token asset id as unit and a 6-decimal raw amount.
 # Mainnet USDCx unit:
 # 1f3aec8bfe7ea4fe14c5f121e2a92e301afe414147860d557cac7e345553444378
 PRICE_AMOUNTS=[{"amount":"1000000","unit":"16a55b2a349361ff88c03788f93e1e966e5d689605d044fef722ddde0014df10745553444d"}]
@@ -296,7 +298,7 @@ deployment:
 
 | Setting | When to change |
 |---------|----------------|
-| `PRICE_AMOUNTS` | Every pricing update. Use tUSDM on Preprod and USDCx on Mainnet for Sokosumi listings. |
+| `PRICE_AMOUNTS` | Every pricing update. Use the tUSDM asset id on Preprod and the USDCx asset id on Mainnet; do not use `lovelace` unless intentionally charging ADA outside the Sokosumi stablecoin flow. |
 | `PAY_BY_OFFSET_SEC` / `SUBMIT_RESULT_OFFSET_SEC` / `UNLOCK_OFFSET_SEC` / `EXTERNAL_DISPUTE_UNLOCK_OFFSET_SEC` | When the agent takes significantly longer than the defaults (45 min median). Must stay monotonic with ≥5 min gap between payBy and submitResult. |
 | `PAYMENT_POLL_INTERVAL_MS` / `PAYMENT_POLL_TIMEOUT_MS` | If Cardano block times are slow or if buyers regularly pay right at the deadline. |
 | `INPUT_SCHEMA_JSON` | Whenever the Langdock agent expects a different input shape. The schema drives the Sokosumi form. |
