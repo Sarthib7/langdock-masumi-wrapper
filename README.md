@@ -16,7 +16,8 @@ MIP-004 hashing (JCS + SHA-256) is applied to both `input_data` and the handler'
 and the output hash is submitted on-chain via the Payment Service so buyers can unlock
 payment.
 
-See [STATUS.md](STATUS.md) for the full production-readiness checklist.
+See [STATUS.md](STATUS.md) for the production-readiness checklist and
+[AUDIT.md](AUDIT.md) for the route/env/payment wiring audit.
 
 ## Architecture
 
@@ -68,6 +69,21 @@ cp .env.example .env
 | `REQUIRE_PRODUCTION_CONFIG` | Set `true` to make startup fail until production env is complete. Also enforced automatically when `NODE_ENV=production` or `PAYMENT_MODE=masumi`. |
 
 Full list in [.env.example](.env.example).
+
+### Wiring Map
+
+| Concern | File |
+|---------|------|
+| Env loading and auth-header selection | [src/config.ts](src/config.ts) |
+| MIP-003 routes | [src/routes/index.ts](src/routes/index.ts) |
+| Payment API client | [src/services/masumiPayment.ts](src/services/masumiPayment.ts) |
+| Payment-gated job runner | [src/services/jobRunner.ts](src/services/jobRunner.ts) |
+| Production readiness checks | [src/services/readiness.ts](src/services/readiness.ts) |
+
+The Masumi client expects `PAYMENT_SERVICE_URL` to include the API prefix:
+`/pay/api/v1` for Masumi SaaS or `/api/v1` for a direct payment node. It then
+calls `POST /payment`, `POST /payment/resolve-blockchain-identifier`, and
+`POST /payment/submit-result`.
 
 Before exposing the service publicly, build and run the readiness check:
 
@@ -122,7 +138,9 @@ curl -s http://localhost:3000/ready
 Field names in the request may be snake_case or camelCase
 (`identifierFromPurchaser`, `inputData`, etc.). If `identifier_from_purchaser` is
 omitted, a hex identifier in the Payment Service's required 14–26 char range is
-auto-generated.
+auto-generated. In `PAYMENT_MODE=masumi`, a provided identifier must already be
+lowercase hex and 14–26 characters; invalid values are rejected before any Masumi
+API call is made.
 
 ## Modes
 

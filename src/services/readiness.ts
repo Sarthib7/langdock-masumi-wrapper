@@ -30,6 +30,10 @@ function hasValue(value: string): boolean {
   return value.trim().length > 0;
 }
 
+function rawEnv(name: string): string {
+  return process.env[name] ?? "";
+}
+
 function pushMissing(
   issues: ReadinessIssue[],
   env: string[],
@@ -109,12 +113,75 @@ function validatePaymentWindows(
   }
 }
 
+function validateMasumiEnvSyntax(
+  config: AppConfig,
+  issues: ReadinessIssue[],
+): void {
+  const rawNetwork = rawEnv("NETWORK") || rawEnv("MASUMI_NETWORK");
+  if (
+    hasValue(rawNetwork) &&
+    rawNetwork.trim() !== "Preprod" &&
+    rawNetwork.trim() !== "Mainnet"
+  ) {
+    issues.push({
+      severity: "error",
+      code: "invalid_network",
+      env: rawEnv("NETWORK") ? ["NETWORK"] : ["MASUMI_NETWORK"],
+      message: "Network must be exactly Preprod or Mainnet.",
+    });
+  }
+
+  const rawAuthHeader = rawEnv("PAYMENT_API_AUTH_HEADER");
+  if (
+    hasValue(rawAuthHeader) &&
+    rawAuthHeader.trim() !== "token" &&
+    rawAuthHeader.trim() !== "x-api-key"
+  ) {
+    issues.push({
+      severity: "error",
+      code: "invalid_payment_api_auth_header",
+      env: ["PAYMENT_API_AUTH_HEADER"],
+      message: "PAYMENT_API_AUTH_HEADER must be token or x-api-key.",
+    });
+  }
+
+  if (hasValue(config.paymentServiceUrl)) {
+    try {
+      const url = new URL(config.paymentServiceUrl);
+      if (
+        config.paymentMode === "masumi" &&
+        !url.pathname.endsWith("/api/v1") &&
+        !url.pathname.endsWith("/pay/api/v1")
+      ) {
+        issues.push({
+          severity: "warning",
+          code: "payment_api_base_path_missing",
+          env: ["PAYMENT_SERVICE_URL"],
+          message:
+            "PAYMENT_SERVICE_URL should include the API prefix: /pay/api/v1 for Masumi SaaS or /api/v1 for a direct payment node.",
+        });
+      }
+    } catch {
+      // URL shape is validated separately.
+    }
+  }
+}
+
 function validatePriceAmounts(
   amounts: PriceAmount[],
   network: AppConfig["masumiNetwork"],
   issues: ReadinessIssue[],
 ): void {
   if (amounts.length === 0) {
+    if (hasValue(rawEnv("PRICE_AMOUNTS"))) {
+      issues.push({
+        severity: "error",
+        code: "invalid_price_amounts_json",
+        env: ["PRICE_AMOUNTS"],
+        message:
+          "PRICE_AMOUNTS is set but could not be parsed as a non-empty JSON array of {amount, unit}. Leave it empty for fixed registered pricing.",
+      });
+    }
     return;
   }
 
@@ -286,6 +353,7 @@ export function getReadinessReport(config: AppConfig): ReadinessReport {
     }
   }
 
+  validateMasumiEnvSyntax(config, issues);
   validatePaymentWindows(config, issues);
   validatePriceAmounts(config.priceAmounts, config.masumiNetwork, issues);
   validateInputSchema(config.inputSchema, issues);

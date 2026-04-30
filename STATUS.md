@@ -4,6 +4,8 @@ Snapshot of the Langdock → Masumi wrapper's compliance with MIP-003
 (Agentic Service API), MIP-004 (Decision Logging hashes), and the
 Sokosumi marketplace listing requirements.
 
+Detailed wiring audit: [AUDIT.md](AUDIT.md).
+
 ## Summary
 
 | Area | Status | Notes |
@@ -28,6 +30,7 @@ Sokosumi marketplace listing requirements.
 ### `POST /start_job` — [src/routes/startJob.ts](src/routes/startJob.ts)
 - [x] Accepts both `identifier_from_purchaser` / `identifierFromPurchaser`.
 - [x] Accepts MIP-003 array form `[{key, value}]` **and** legacy object form.
+- [x] Rejects Masumi-mode purchaser identifiers that are not lowercase hex, 14–26 chars.
 - [x] Computes `input_hash` via MIP-004.
 - [x] Registers a sale on the Masumi Payment Service (when `PAYMENT_MODE=masumi`).
 - [x] Returns payment timing fields from the Payment Service response.

@@ -24,7 +24,10 @@ import {
   MasumiPaymentError,
 } from "../services/masumiPayment.js";
 import type { StartJobResponseBody } from "../types/masumi.js";
-import { normalizeStartJobBody } from "../utils/startJobBody.js";
+import {
+  isValidIdentifierFromPurchaser,
+  normalizeStartJobBody,
+} from "../utils/startJobBody.js";
 
 export function registerStartJob(
   app: FastifyInstance,
@@ -69,6 +72,13 @@ export function registerStartJob(
     let blockchainIdentifier = `direct_${jobId}`;
 
     if (config.paymentMode === "masumi") {
+      if (!isValidIdentifierFromPurchaser(identifierFromPurchaser)) {
+        return reply.status(400).send({
+          error: "INVALID_IDENTIFIER_FROM_PURCHASER",
+          message:
+            "identifier_from_purchaser must be lowercase hex and 14-26 characters when PAYMENT_MODE=masumi",
+        });
+      }
       if (agentIdentifier === "unregistered-agent" || !sellerVKey) {
         return reply.status(500).send({
           error: "AGENT_NOT_REGISTERED",

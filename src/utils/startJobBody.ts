@@ -17,6 +17,10 @@ function generateHexIdentifier(): string {
   return randomBytes(12).toString("hex");
 }
 
+export function isValidIdentifierFromPurchaser(value: string): boolean {
+  return /^[0-9a-f]+$/.test(value) && value.length >= 14 && value.length <= 26;
+}
+
 function toInputDataArray(raw: unknown): InputDataItem[] {
   if (raw === undefined || raw === null) return [];
 

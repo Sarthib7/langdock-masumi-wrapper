@@ -105,6 +105,31 @@ describe("getReadinessReport", () => {
     expect(config.paymentApiAuthHeader).toBe("token");
   });
 
+  it("reports invalid Masumi wiring env instead of silently falling back", () => {
+    resetEnv();
+    process.env.PAYMENT_MODE = "masumi";
+    process.env.LANGDOCK_API_KEY = "ld-key";
+    process.env.LANGDOCK_AGENT_ID = "agent-id";
+    process.env.AGENT_IDENTIFIER = "agent-id-on-chain";
+    process.env.SELLER_VKEY = "seller-vkey";
+    process.env.PAYMENT_SERVICE_URL = "https://saas.example.com";
+    process.env.PAYMENT_API_KEY = "payment-token";
+    process.env.NETWORK = "mainnet";
+    process.env.PAYMENT_API_AUTH_HEADER = "bearer";
+    process.env.PRICE_AMOUNTS = "not json";
+
+    const report = getReadinessReport(loadConfig());
+    expect(report.status).toBe("not_ready");
+    expect(report.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "invalid_network" }),
+        expect.objectContaining({ code: "invalid_payment_api_auth_header" }),
+        expect.objectContaining({ code: "invalid_price_amounts_json" }),
+        expect.objectContaining({ code: "payment_api_base_path_missing" }),
+      ]),
+    );
+  });
+
   it("accepts USDCx as the expected mainnet settlement token", () => {
     resetEnv();
     process.env.PAYMENT_MODE = "masumi";

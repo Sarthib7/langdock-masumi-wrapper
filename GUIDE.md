@@ -111,7 +111,12 @@ Follow the upstream Docker instructions. At the end you should have:
 Verify the payment API is reachable:
 
 ```bash
+# Masumi SaaS
 curl -H "x-api-key: $PAYMENT_API_KEY" \
+     "$PAYMENT_SERVICE_URL/payment?network=$NETWORK"
+
+# Direct payment node
+curl -H "token: $PAYMENT_API_KEY" \
      "$PAYMENT_SERVICE_URL/payment?network=$NETWORK"
 ```
 
@@ -221,15 +226,18 @@ answer. If this fails, fix Langdock credentials before touching Masumi.
 Switch back to `PAYMENT_MODE=masumi`. Have a separate *purchaser* wallet
 funded with tADA (or ask a Masumi engineer for one).
 
-1. Call `/start_job` against the wrapper — you should receive a
+1. Call `/start_job` against the wrapper. Use a lowercase hex
+   `identifier_from_purchaser` of 14–26 characters, or omit it so the wrapper
+   generates one.
+2. You should receive a
    `blockchainIdentifier` and four timings.
-2. From the purchaser wallet, send payment referencing that identifier.
-3. Watch the wrapper logs: the poller will detect `FundsLocked` and run the
+3. From the purchaser wallet, send payment referencing that identifier.
+4. Watch the wrapper logs: the poller will detect `FundsLocked` and run the
    Langdock handler.
-4. `/status` flips through `awaiting_payment → running → completed` and
+5. `/status` flips through `awaiting_payment → running → completed` and
    exposes `input_hash` + `output_hash`.
-5. From the purchaser side, unlock to release funds to the selling wallet.
-6. Confirm tADA arrived in the selling wallet.
+6. From the purchaser side, unlock to release funds to the selling wallet.
+7. Confirm tADA arrived in the selling wallet.
 
 If any step stalls, see **Section 8 — Troubleshooting**.
 
@@ -291,9 +299,9 @@ first because they take days, not minutes.
 
 ## 6. Configuration Reference
 
-See the full env table in [README.md](README.md#environment) and defaults in
-[`.env.example`](.env.example). The settings you will actually tune per
-deployment:
+See the full env table in [README.md](README.md#environment), defaults in
+[`.env.example`](.env.example), and the route/payment wiring audit in
+[AUDIT.md](AUDIT.md). The settings you will actually tune per deployment:
 
 | Setting | When to change |
 |---------|----------------|

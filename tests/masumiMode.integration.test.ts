@@ -190,12 +190,38 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
       method: "POST",
       url: "/start_job",
       payload: {
-        identifier_from_purchaser: "p",
+        identifier_from_purchaser: "aabbccddeeff0011",
         input_data: [],
       },
     });
     expect(res.statusCode).toBe(500);
     expect((res.json() as { error: string }).error).toBe("AGENT_NOT_REGISTERED");
+    await app.close();
+  });
+
+  it("rejects purchaser identifiers that the Masumi payment API cannot accept", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const handler = new AgentEndpointHandler();
+    handler.setStartJobHandler(async () => ({}));
+    const app = await buildApp({ endpointHandler: handler });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/start_job",
+      payload: {
+        identifier_from_purchaser: "buyer-1",
+        input_data: [],
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: string }).error).toBe(
+      "INVALID_IDENTIFIER_FROM_PURCHASER",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+
     await app.close();
   });
 });
