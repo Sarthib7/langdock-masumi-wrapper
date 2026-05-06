@@ -537,6 +537,43 @@ function setupHtml(): string {
       color: var(--text);
       font-size: 14px;
     }
+    .help {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      background: color-mix(in srgb, var(--panel), var(--bg) 35%);
+    }
+    .help h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+    .help dl {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+    }
+    .help dt {
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .help dd {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .help a {
+      color: var(--accent);
+      font-weight: 750;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
     .error {
       color: var(--danger);
       font-size: 14px;
@@ -594,6 +631,27 @@ function setupHtml(): string {
       <section aria-labelledby="configTitle">
         <h2 id="configTitle">Runtime config</h2>
         <p class="banner">Credentials are saved to <code>.env</code>, applied to this process, and never shown again. Set <code>SETUP_ACCESS_TOKEN</code> before exposing this page publicly.</p>
+        <div class="help" aria-labelledby="credentialGuideTitle">
+          <h3 id="credentialGuideTitle">Credential guide</h3>
+          <dl>
+            <div>
+              <dt>Setup access token</dt>
+              <dd>Protects this setup page. Generate any long random secret, for example <code>openssl rand -hex 32</code>, then add it to Railway as <code>SETUP_ACCESS_TOKEN</code>. <a href="https://docs.railway.com/variables" target="_blank" rel="noreferrer">Railway variables</a></dd>
+            </div>
+            <div>
+              <dt>Langdock API key and Agent ID</dt>
+              <dd>Create an API key in Langdock workspace settings, share the agent with that API key, then copy the agent ID from the agent URL. <a href="https://docs.langdock.com/api-endpoints/agent/agent-api-guide" target="_blank" rel="noreferrer">Langdock guide</a></dd>
+            </div>
+            <div>
+              <dt>Payment Service URL and API key</dt>
+              <dd>Use a Masumi Payment Service base URL ending in <code>/api/v1</code> or Masumi SaaS ending in <code>/pay/api/v1</code>. API keys authenticate with <code>token</code> or <code>x-api-key</code>. <a href="https://docs.masumi.network/api-reference" target="_blank" rel="noreferrer">Masumi API reference</a></dd>
+            </div>
+            <div>
+              <dt>Seller VKey and Agent Identifier</dt>
+              <dd>The seller VKey identifies the funded selling wallet. The agent identifier is created by Masumi registry registration; use Register agent, then Refresh registry until it appears. <a href="https://docs.masumi.network/documentation/how-to-guides/list-agent-on-sokosumi" target="_blank" rel="noreferrer">Sokosumi listing guide</a></dd>
+            </div>
+          </dl>
+        </div>
         <form id="configForm" novalidate>
           <fieldset>
             <legend>Access</legend>

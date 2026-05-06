@@ -55,6 +55,11 @@ describe("setup UI", () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toContain("text/html");
     expect(res.body).toContain("Langdock Masumi Setup");
+    expect(res.body).toContain("Credential guide");
+    expect(res.body).toContain("openssl rand -hex 32");
+    expect(res.body).toContain(
+      "https://docs.langdock.com/api-endpoints/agent/agent-api-guide",
+    );
 
     await app.close();
   });
