@@ -7,7 +7,7 @@ import {
   getReadinessReport,
 } from "../src/services/readiness.js";
 import {
-  MAINNET_USDM_UNIT,
+  MAINNET_USDCX_UNIT,
   PREPROD_TUSDM_UNIT,
 } from "../src/services/sokosumiTokens.js";
 
@@ -150,7 +150,7 @@ describe("getReadinessReport", () => {
     );
   });
 
-  it("accepts USDM as the expected mainnet settlement token", () => {
+  it("accepts USDCx as the expected mainnet settlement token", () => {
     resetEnv();
     process.env.PAYMENT_MODE = "masumi";
     process.env.NETWORK = "Mainnet";
@@ -161,7 +161,7 @@ describe("getReadinessReport", () => {
     process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
     process.env.PAYMENT_API_KEY = "payment-token";
     process.env.PRICE_AMOUNTS = JSON.stringify([
-      { amount: "1000000", unit: MAINNET_USDM_UNIT },
+      { amount: "1000000", unit: MAINNET_USDCX_UNIT },
     ]);
 
     const report = getReadinessReport(loadConfig());
@@ -171,7 +171,7 @@ describe("getReadinessReport", () => {
     );
   });
 
-  it("warns when mainnet pricing is not USDM", () => {
+  it("warns when mainnet pricing is not USDCx", () => {
     resetEnv();
     process.env.PAYMENT_MODE = "masumi";
     process.env.NETWORK = "Mainnet";
@@ -191,7 +191,7 @@ describe("getReadinessReport", () => {
       expect.objectContaining({
         code: "non_sokosumi_settlement_unit",
         message:
-          "Sokosumi mainnet listings are expected to settle in USDM; use the full USDM asset id as unit, not lovelace.",
+          "Sokosumi mainnet listings are expected to settle in USDCx; use the full USDCx asset id as unit, not lovelace.",
       }),
     );
   });

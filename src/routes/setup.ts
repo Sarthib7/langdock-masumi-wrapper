@@ -28,7 +28,7 @@ import {
   type RegistryAgent,
 } from "../services/masumiPayment.js";
 import { getReadinessReport } from "../services/readiness.js";
-import { MAINNET_USDM_UNIT, PREPROD_TUSDM_UNIT } from "../services/sokosumiTokens.js";
+import { MAINNET_USDCX_UNIT, PREPROD_TUSDM_UNIT } from "../services/sokosumiTokens.js";
 
 type SetupConfigBody = {
   langdockBaseUrl?: unknown;
@@ -131,7 +131,7 @@ function requireString(value: unknown, label: string): string {
 }
 
 function defaultPricingUnit(network: MasumiNetwork): string {
-  return network === "Mainnet" ? MAINNET_USDM_UNIT : PREPROD_TUSDM_UNIT;
+  return network === "Mainnet" ? MAINNET_USDCX_UNIT : PREPROD_TUSDM_UNIT;
 }
 
 function configuredPaymentClient(): MasumiPaymentClient {
@@ -722,7 +722,7 @@ function setupHtml(): string {
             <label>
               Price amount
               <input name="pricingAmount" type="text" inputmode="numeric" pattern="[0-9]*" value="1000000" />
-              <span class="hint">Raw units. 1000000 = 1 tUSDM/USDM.</span>
+              <span class="hint">Raw units. 1000000 = 1 tUSDM/USDCx.</span>
             </label>
             <label>
               Price unit
@@ -780,7 +780,7 @@ function setupHtml(): string {
 
   <script>
     const PREPROD_TUSDM_UNIT = '${PREPROD_TUSDM_UNIT}';
-    const MAINNET_USDM_UNIT = '${MAINNET_USDM_UNIT}';
+    const MAINNET_USDCX_UNIT = '${MAINNET_USDCX_UNIT}';
     const configForm = document.getElementById('configForm');
     const registryForm = document.getElementById('registryForm');
     const startJobForm = document.getElementById('startJobForm');
@@ -820,7 +820,7 @@ function setupHtml(): string {
     function syncPricingUnit() {
       const field = registryForm.elements.pricingUnit;
       if (!field.value.trim()) {
-        field.value = selectedNetwork() === 'Mainnet' ? MAINNET_USDM_UNIT : PREPROD_TUSDM_UNIT;
+        field.value = selectedNetwork() === 'Mainnet' ? MAINNET_USDCX_UNIT : PREPROD_TUSDM_UNIT;
       }
     }
 
@@ -898,7 +898,7 @@ function setupHtml(): string {
     document.getElementById('refreshState').addEventListener('click', refreshState);
     configForm.addEventListener('change', (event) => {
       if (event.target && event.target.name === 'network') {
-        registryForm.elements.pricingUnit.value = selectedNetwork() === 'Mainnet' ? MAINNET_USDM_UNIT : PREPROD_TUSDM_UNIT;
+        registryForm.elements.pricingUnit.value = selectedNetwork() === 'Mainnet' ? MAINNET_USDCX_UNIT : PREPROD_TUSDM_UNIT;
       }
     });
 

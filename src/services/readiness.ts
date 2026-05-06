@@ -6,7 +6,7 @@
  */
 
 import type { AppConfig, InputSchemaField, PriceAmount } from "../config.js";
-import { MAINNET_USDM_UNIT, PREPROD_TUSDM_UNIT } from "./sokosumiTokens.js";
+import { MAINNET_USDCX_UNIT, PREPROD_TUSDM_UNIT } from "./sokosumiTokens.js";
 
 export type ReadinessSeverity = "error" | "warning";
 
@@ -208,7 +208,7 @@ function validatePriceAmounts(
   }
 
   const expectedUnit =
-    network === "Mainnet" ? MAINNET_USDM_UNIT : PREPROD_TUSDM_UNIT;
+    network === "Mainnet" ? MAINNET_USDCX_UNIT : PREPROD_TUSDM_UNIT;
   const hasSokosumiUnit = amounts.some((amount) => amount.unit === expectedUnit);
   if (!hasSokosumiUnit) {
     issues.push({
@@ -217,7 +217,7 @@ function validatePriceAmounts(
       env: ["PRICE_AMOUNTS"],
       message:
         network === "Mainnet"
-          ? "Sokosumi mainnet listings are expected to settle in USDM; use the full USDM asset id as unit, not lovelace."
+          ? "Sokosumi mainnet listings are expected to settle in USDCx; use the full USDCx asset id as unit, not lovelace."
           : "Sokosumi Preprod listings are expected to settle in tUSDM; use the full tUSDM asset id as unit, not lovelace.",
     });
   }

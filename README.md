@@ -135,7 +135,7 @@ being confirmed, the agent URL being public and healthy, and pricing using the
 expected settlement token:
 
 - Preprod: tUSDM `16a55b2a349361ff88c03788f93e1e966e5d689605d044fef722ddde0014df10745553444d`
-- Mainnet: USDM `c48cbb3d5e57ed56e276bc45f99ab39abe94e6cd7ac39fb402da47ad0014df105553444d`
+- Mainnet: USDCx `1f3aec8bfe7ea4fe14c5f121e2a92e301afe414147860d557cac7e345553444378`
 
 ## Handlers
 
