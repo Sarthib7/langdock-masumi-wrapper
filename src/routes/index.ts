@@ -9,12 +9,14 @@ import { registerInputSchema } from "./inputSchema.js";
 import { registerReadiness } from "./readiness.js";
 import { registerStartJob } from "./startJob.js";
 import { registerStatus } from "./status.js";
+import { registerSetup } from "./setup.js";
 
 /** Attaches MIP-003 routes plus operator readiness. */
 export function registerRoutes(
   app: FastifyInstance,
   ctx: BridgeContext,
 ): void {
+  registerSetup(app, ctx);
   registerAvailability(app, ctx);
   registerStatus(app, ctx);
   registerStartJob(app, ctx);

@@ -73,6 +73,48 @@ export type PaymentStatus = {
   raw: Record<string, unknown>;
 };
 
+export type RegistryExampleOutput = {
+  name: string;
+  url: string;
+  mimeType: string;
+};
+
+export type RegisterAgentArgs = {
+  network: MasumiNetwork;
+  sellingWalletVkey: string;
+  name: string;
+  description: string;
+  apiBaseUrl: string;
+  capabilityName: string;
+  capabilityVersion: string;
+  authorName: string;
+  authorContactEmail?: string;
+  authorContactOther?: string;
+  authorOrganization?: string;
+  tags: string[];
+  pricing: PriceAmount[];
+  exampleOutputs?: RegistryExampleOutput[];
+  legal?: {
+    privacyPolicy?: string;
+    terms?: string;
+    other?: string;
+  };
+};
+
+export type RegistryAgent = Record<string, unknown> & {
+  agentIdentifier?: string;
+  state?: string;
+  name?: string;
+  apiBaseUrl?: string;
+};
+
+export type RegisterAgentResult = {
+  data: RegistryAgent;
+  agentIdentifier?: string;
+  state?: string;
+  raw: Record<string, unknown>;
+};
+
 export class MasumiPaymentClient {
   private readonly baseUrl: string;
   private readonly apiKey: string;
@@ -271,6 +313,68 @@ export class MasumiPaymentClient {
       { body },
     );
     return resp;
+  }
+
+  /** POST /registry/ — mints a Masumi agent identity NFT through the Payment Service. */
+  async registerAgent(args: RegisterAgentArgs): Promise<RegisterAgentResult> {
+    const body = {
+      network: args.network,
+      sellingWalletVkey: args.sellingWalletVkey,
+      ExampleOutputs: args.exampleOutputs ?? [],
+      Tags: args.tags,
+      name: args.name,
+      description: args.description,
+      Author: {
+        name: args.authorName,
+        contactEmail: args.authorContactEmail ?? "",
+        contactOther: args.authorContactOther ?? "",
+        organization: args.authorOrganization ?? "",
+      },
+      apiBaseUrl: args.apiBaseUrl,
+      Legal: {
+        privacyPolicy: args.legal?.privacyPolicy ?? "",
+        terms: args.legal?.terms ?? "",
+        other: args.legal?.other ?? "",
+      },
+      Capability: {
+        name: args.capabilityName,
+        version: args.capabilityVersion,
+      },
+      AgentPricing: {
+        pricingType: "Fixed",
+        Pricing: args.pricing,
+      },
+    };
+
+    const resp = await this.request<Record<string, unknown>>(
+      "POST",
+      "/registry/",
+      { body },
+    );
+    const data = ((resp as { data?: RegistryAgent }).data ??
+      resp) as RegistryAgent;
+    return {
+      data,
+      agentIdentifier:
+        typeof data.agentIdentifier === "string" ? data.agentIdentifier : undefined,
+      state: typeof data.state === "string" ? data.state : undefined,
+      raw: resp,
+    };
+  }
+
+  /** GET /registry/ — lists registration records for the configured network. */
+  async listRegistry(): Promise<RegistryAgent[]> {
+    const resp = await this.request<Record<string, unknown>>(
+      "GET",
+      "/registry/",
+      { query: { network: this.network } },
+    );
+    const data = ((resp as { data?: unknown }).data ?? resp) as Record<
+      string,
+      unknown
+    >;
+    const assets = data.Assets;
+    return Array.isArray(assets) ? (assets as RegistryAgent[]) : [];
   }
 }
 

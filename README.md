@@ -5,6 +5,13 @@ MIP-003-compliant Masumi agent, ready to list on [Sokosumi](https://app.sokosumi
 
 It implements:
 
+- `GET  /`            — minimal operator setup UI for posting Langdock and
+  Masumi credentials into `.env` and the running process.
+- `GET/POST /setup/config` — redacted setup status and persistent credential update.
+- `POST /setup/registry/register` — operator helper that registers the configured
+  agent through the Masumi Payment Service `/registry/` endpoint.
+- `GET /setup/registry/status` — polls Payment Service registry records and saves
+  `AGENT_IDENTIFIER` once the registration returns one.
 - `POST /start_job`   — registers a sale on the Masumi Payment Service, returns
   `blockchainIdentifier` + payment timings, defers execution until funds are locked.
 - `GET  /status`      — MIP-003 payload with `input_hash`, `output_hash`, result, timestamps.
@@ -67,6 +74,8 @@ cp .env.example .env
 | `PRICE_AMOUNTS` | Optional dynamic `RequestedFunds` JSON array. Leave empty for fixed pricing configured in Masumi SaaS/admin. |
 | `INPUT_SCHEMA_PATH` / `INPUT_SCHEMA_JSON` | MIP-003 schema served at `/input_schema`. |
 | `REQUIRE_PRODUCTION_CONFIG` | Set `true` to make startup fail until production env is complete. Also enforced automatically when `NODE_ENV=production` or `PAYMENT_MODE=masumi`. |
+| `SETUP_ACCESS_TOKEN` | Optional shared token required by `POST /setup/config`. Set this before exposing the setup page beyond localhost. |
+| `SETUP_ENV_PATH` | Optional path where `POST /setup/config` writes persistent env config. Defaults to `.env` in the current working directory. |
 
 Full list in [.env.example](.env.example).
 
@@ -96,6 +105,37 @@ curl -s http://localhost:3000/ready
 The check fails on missing Langdock credentials, missing Masumi identity/payment
 credentials in `masumi` mode, invalid payment windows, invalid dynamic pricing,
 or an empty/duplicate input schema.
+
+### Hosted setup UI
+
+Run the service and open `http://localhost:3000/` to configure the wrapper from
+a browser. The form posts Langdock and Masumi credentials to `POST /setup/config`;
+the server writes them to `.env`, applies them to the current process, and
+rebinds the default Langdock `start_job` handler immediately. Submitted secrets
+are not returned by `GET /setup/config` or the UI status panel. Empty secret
+fields keep their previous value so refreshing status or changing non-secret
+settings does not erase credentials.
+
+If the page is reachable by anyone except the operator, set:
+
+```bash
+SETUP_ACCESS_TOKEN="change-me"
+```
+
+Then enter the same token in the UI before applying config, or send it as
+`x-setup-token` / `Authorization: Bearer ...` when calling `POST /setup/config`.
+
+The setup UI can also submit an on-chain registry request through the configured
+Payment Service. Registration requires a funded selling wallet and uses
+`POST {PAYMENT_SERVICE_URL}/registry/`. Preprod should be used first; on-chain
+confirmation can take several minutes. Once the registry response includes an
+`agentIdentifier`, the helper saves it to `.env` so `/start_job` can register
+paid jobs with that identity. Sokosumi discovery depends on the registry NFT
+being confirmed, the agent URL being public and healthy, and pricing using the
+expected settlement token:
+
+- Preprod: tUSDM `16a55b2a349361ff88c03788f93e1e966e5d689605d044fef722ddde0014df10745553444d`
+- Mainnet: USDM `c48cbb3d5e57ed56e276bc45f99ab39abe94e6cd7ac39fb402da47ad0014df105553444d`
 
 ## Handlers
 

@@ -2,9 +2,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
-import { getReadinessReport } from "../src/services/readiness.js";
 import {
-  MAINNET_USDCX_UNIT,
+  assertProductionReady,
+  getReadinessReport,
+} from "../src/services/readiness.js";
+import {
+  MAINNET_USDM_UNIT,
   PREPROD_TUSDM_UNIT,
 } from "../src/services/sokosumiTokens.js";
 
@@ -85,6 +88,23 @@ describe("getReadinessReport", () => {
     );
   });
 
+  it("allows the dev server to start before runtime setup credentials are posted", () => {
+    resetEnv();
+    process.env.PAYMENT_MODE = "masumi";
+
+    expect(() => assertProductionReady(loadConfig())).not.toThrow();
+  });
+
+  it("still blocks startup when explicit production config enforcement is enabled", () => {
+    resetEnv();
+    process.env.PAYMENT_MODE = "masumi";
+    process.env.REQUIRE_PRODUCTION_CONFIG = "true";
+
+    expect(() => assertProductionReady(loadConfig())).toThrow(
+      "Production configuration is not ready",
+    );
+  });
+
   it("keeps the configured SaaS base URL and auto-selects x-api-key auth", () => {
     resetEnv();
     process.env.PAYMENT_SERVICE_URL = "https://saas.example.com/pay/api/v1";
@@ -130,7 +150,7 @@ describe("getReadinessReport", () => {
     );
   });
 
-  it("accepts USDCx as the expected mainnet settlement token", () => {
+  it("accepts USDM as the expected mainnet settlement token", () => {
     resetEnv();
     process.env.PAYMENT_MODE = "masumi";
     process.env.NETWORK = "Mainnet";
@@ -141,7 +161,7 @@ describe("getReadinessReport", () => {
     process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
     process.env.PAYMENT_API_KEY = "payment-token";
     process.env.PRICE_AMOUNTS = JSON.stringify([
-      { amount: "1000000", unit: MAINNET_USDCX_UNIT },
+      { amount: "1000000", unit: MAINNET_USDM_UNIT },
     ]);
 
     const report = getReadinessReport(loadConfig());
@@ -151,7 +171,7 @@ describe("getReadinessReport", () => {
     );
   });
 
-  it("warns when mainnet pricing is not USDCx", () => {
+  it("warns when mainnet pricing is not USDM", () => {
     resetEnv();
     process.env.PAYMENT_MODE = "masumi";
     process.env.NETWORK = "Mainnet";
@@ -171,7 +191,7 @@ describe("getReadinessReport", () => {
       expect.objectContaining({
         code: "non_sokosumi_settlement_unit",
         message:
-          "Sokosumi mainnet listings are expected to settle in USDCx; use the full USDCx asset id as unit, not lovelace.",
+          "Sokosumi mainnet listings are expected to settle in USDM; use the full USDM asset id as unit, not lovelace.",
       }),
     );
   });
