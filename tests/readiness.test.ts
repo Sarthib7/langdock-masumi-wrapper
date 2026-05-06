@@ -95,6 +95,18 @@ describe("getReadinessReport", () => {
     expect(() => assertProductionReady(loadConfig())).not.toThrow();
   });
 
+  it("does not enforce readiness while building the HTTP app in production", async () => {
+    resetEnv();
+    process.env.NODE_ENV = "production";
+    process.env.PAYMENT_MODE = "direct";
+    const app = await buildApp();
+
+    const res = await app.inject({ method: "GET", url: "/" });
+    expect(res.statusCode).toBe(200);
+
+    await app.close();
+  });
+
   it("still blocks startup when explicit production config enforcement is enabled", () => {
     resetEnv();
     process.env.PAYMENT_MODE = "masumi";
