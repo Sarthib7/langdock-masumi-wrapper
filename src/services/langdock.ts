@@ -5,15 +5,25 @@
 import type {
   LangdockChatCompletionsRequest,
   LangdockChatCompletionsResponse,
+  LangdockMessagePart,
   LangdockUIMessage,
 } from "../types/langdock.js";
 
 /** Concatenates `text` parts from a UIMessage `parts` array. */
-function joinTextParts(parts: LangdockUIMessage["parts"]): string {
+function joinTextParts(parts: LangdockMessagePart[] | undefined): string {
+  if (!parts?.length) return "";
   return parts
     .filter((p): p is { type: "text"; text: string } => p.type === "text")
     .map((p) => p.text)
     .join("");
+}
+
+function assistantText(message: LangdockUIMessage | undefined): string {
+  if (!message) return "";
+  if (typeof message.content === "string" && message.content.length > 0) {
+    return message.content;
+  }
+  return joinTextParts(message.parts);
 }
 
 /**
@@ -31,13 +41,17 @@ export function extractAssistantContent(
       return String(data.output);
     }
   }
+
+  const rootPartsText = joinTextParts(data.parts);
+  if (rootPartsText) return rootPartsText;
+
   const messages = data.messages;
   if (!messages?.length) return "";
 
   const assistantMessages = messages.filter((m) => m.role === "assistant");
   const last =
     assistantMessages[assistantMessages.length - 1] ?? messages[messages.length - 1];
-  return joinTextParts(last.parts ?? []);
+  return assistantText(last);
 }
 
 /** Arguments for `completeChat`. */
