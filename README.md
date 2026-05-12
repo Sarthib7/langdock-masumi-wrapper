@@ -8,8 +8,7 @@ It implements:
 - `GET  /`            — minimal operator setup UI for posting Langdock and
   Masumi credentials into `.env` and the running process.
 - `GET/POST /setup/config` — redacted setup status and persistent credential update.
-- `POST /setup/registry/register` — operator helper that registers the configured
-  agent through the Masumi Payment Service `/registry/` endpoint.
+- Setup login UI — authenticate with either an access hash (`SETUP_ACCESS_TOKEN`) or username/password (`SETUP_USERNAME` + `SETUP_PASSWORD`).
 - `GET /setup/registry/status` — polls Payment Service registry records and saves
   `AGENT_IDENTIFIER` once the registration returns one.
 - `POST /start_job`   — registers a sale on the Masumi Payment Service, returns
@@ -77,6 +76,7 @@ cp .env.example .env
 | `INPUT_SCHEMA_PATH` / `INPUT_SCHEMA_JSON` | MIP-003 schema served at `/input_schema`. |
 | `REQUIRE_PRODUCTION_CONFIG` | Set `true` to make startup fail until production env is complete. Also enforced automatically when `NODE_ENV=production` or `PAYMENT_MODE=masumi`. |
 | `SETUP_ACCESS_TOKEN` | Optional shared token required by `POST /setup/config`. Set this before exposing the setup page beyond localhost. |
+| `SETUP_USERNAME` / `SETUP_PASSWORD` | Alternative login using HTTP Basic auth. Takes precedence over `SETUP_ACCESS_TOKEN` when both are set. |
 | `SETUP_ENV_PATH` | Optional path where `POST /setup/config` writes persistent env config. Defaults to `.env` in the current working directory. |
 
 Full list in [.env.example](.env.example).
@@ -119,14 +119,26 @@ are not returned by `GET /setup/config` or the UI status panel. Empty secret
 fields keep their previous value so refreshing status or changing non-secret
 settings does not erase credentials.
 
-If the page is reachable by anyone except the operator, set:
+If the page is reachable by anyone except the operator, set either an access hash:
 
 ```bash
 SETUP_ACCESS_TOKEN="change-me"
 ```
 
-Then enter the same token in the UI before applying config, or send it as
-`x-setup-token` / `Authorization: Bearer ...` when calling `POST /setup/config`.
+…or username/password auth:
+
+```bash
+SETUP_USERNAME="operator"
+SETUP_PASSWORD="change-me"
+```
+
+The setup UI login section lets you toggle between the two methods. When both are
+configured, either credential set is accepted.
+
+The setup UI also includes **Agent slots** — up to four registration profiles saved
+in your browser's localStorage. Click a slot, fill in the registration fields, and
+use **Save current slot** to persist it locally. **Register agent** submits the
+selected slot to the Masumi registry and auto-saves the profile afterwards.
 
 #### Credential guide
 
