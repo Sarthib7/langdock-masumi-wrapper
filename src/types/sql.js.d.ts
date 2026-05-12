@@ -14,10 +14,14 @@ declare module "sql.js" {
     free(): boolean;
   }
 
+  interface SqlJsConfig {
+    locateFile?: (file: string) => string;
+  }
+
   interface SqlJsStatic {
     Database: new (data?: ArrayLike<number | undefined>) => Database;
   }
 
-  export default function initSqlJs(): Promise<SqlJsStatic>;
+  export default function initSqlJs(config?: SqlJsConfig): Promise<SqlJsStatic>;
   export type { Database, Statement, SqlJsStatic };
 }

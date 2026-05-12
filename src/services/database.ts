@@ -25,7 +25,16 @@ async function loadDb(): Promise<SqlJsDatabase> {
   dbPathValue = dbPath();
   mkdirSync(path.dirname(dbPathValue), { recursive: true });
 
-  const SQL = await initSqlJs();
+  const SQL = await initSqlJs({
+    locateFile: (file: string) => {
+      // Resolve WASM binary relative to the installed sql.js package
+      try {
+        return require.resolve(`sql.js/dist/${file}`);
+      } catch {
+        return file;
+      }
+    },
+  });
 
   if (existsSync(dbPathValue)) {
     const buffer = readFileSync(dbPathValue);
