@@ -15,6 +15,8 @@ import {
   inputObjectToMessage,
 } from "../services/hitlChat.js";
 import { getJob } from "../services/jobs.js";
+import { verifyOpaqueToken } from "../services/opaqueTokens.js";
+import { checkRateLimit } from "../services/rateLimit.js";
 
 export type ProvideInputBody = {
   job_id?: unknown;
@@ -22,6 +24,9 @@ export type ProvideInputBody = {
   id?: unknown;
   status_id?: unknown;
   statusId?: unknown;
+  input_token?: unknown;
+  inputToken?: unknown;
+  continuationToken?: unknown;
   input_data?: unknown;
   inputData?: unknown;
 };
@@ -63,6 +68,25 @@ export function registerProvideInput(app: FastifyInstance): void {
       });
     }
 
+    const rateLimit = checkRateLimit({
+      scope: "provide-input",
+      identifier: `${request.ip}:${jobId}`,
+      limit: 20,
+      windowMs: 60 * 1000,
+    });
+    reply.header("x-ratelimit-limit", String(rateLimit.limit));
+    reply.header("x-ratelimit-remaining", String(rateLimit.remaining));
+    reply.header("x-ratelimit-reset", String(Math.ceil(rateLimit.resetAt / 1000)));
+    if (!rateLimit.allowed) {
+      return reply
+        .header("retry-after", String(rateLimit.retryAfterSeconds))
+        .status(429)
+        .send({
+          error: "RATE_LIMITED",
+          message: "Too many HITL continuation requests. Try again later.",
+        });
+    }
+
     const inputData = normalizeInputData(
       body.input_data !== undefined ? body.input_data : body.inputData,
     );
@@ -78,6 +102,23 @@ export function registerProvideInput(app: FastifyInstance): void {
       return reply.status(404).send({
         error: "JOB_NOT_FOUND",
         message: `No job exists with ID: ${jobId}`,
+      });
+    }
+
+    const headerToken = request.headers["x-job-token"];
+    const providedToken =
+      str(body.input_token) ??
+      str(body.inputToken) ??
+      str(body.continuationToken) ??
+      (typeof headerToken === "string" ? headerToken : undefined);
+    if (
+      !job.continuation_token_hash ||
+      !providedToken ||
+      !verifyOpaqueToken(providedToken, job.continuation_token_hash)
+    ) {
+      return reply.status(403).send({
+        error: "HITL_TOKEN_REQUIRED",
+        message: "A valid HITL continuation token is required.",
       });
     }
 
@@ -107,6 +148,12 @@ export function registerProvideInput(app: FastifyInstance): void {
     }
 
     const message = inputObjectToMessage(inputData);
+    if (message.length > 16_000) {
+      return reply.status(413).send({
+        error: "INPUT_TOO_LARGE",
+        message: "HITL messages must be 16000 characters or fewer.",
+      });
+    }
     const updated = await continueHitlChatJob({ job, message, config });
 
     return reply.status(200).send({

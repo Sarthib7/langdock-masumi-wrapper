@@ -46,6 +46,11 @@ export type StartJobResponseBody = {
   externalDisputeUnlockTime: number;
   status: JobStatus;
   amounts?: Array<{ amount: string; unit: string }>;
+  /**
+   * Opaque bearer token required by `/provide_input` for HITL continuations.
+   * Present only when HITL chat mode is enabled.
+   */
+  continuationToken?: string;
 };
 
 /** JSON body for `GET /status` (MIP-003 §2). */
@@ -95,6 +100,7 @@ export type JobRecord = {
   result?: unknown;
   output_hash?: string;
   error?: string;
+  continuation_token_hash?: string;
   awaiting_input_schema?: unknown;
   awaiting_input_message?: string;
   conversation?: Array<{

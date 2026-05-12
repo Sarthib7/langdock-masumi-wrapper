@@ -19,6 +19,8 @@ import { loadConfig, resolveAgentDisplayIdentity } from "../config.js";
 import { computeInputHash } from "../services/hashing.js";
 import { createJob } from "../services/jobs.js";
 import { runDirect, runWithPayment } from "../services/jobRunner.js";
+import { generateOpaqueToken, hashOpaqueToken } from "../services/opaqueTokens.js";
+import { checkRateLimit } from "../services/rateLimit.js";
 import {
   MasumiPaymentClient,
   MasumiPaymentError,
@@ -34,6 +36,25 @@ export function registerStartJob(
   ctx: BridgeContext,
 ): void {
   app.post("/start_job", async (request, reply) => {
+    const rateLimit = checkRateLimit({
+      scope: "start-job",
+      identifier: request.ip,
+      limit: 60,
+      windowMs: 60 * 1000,
+    });
+    reply.header("x-ratelimit-limit", String(rateLimit.limit));
+    reply.header("x-ratelimit-remaining", String(rateLimit.remaining));
+    reply.header("x-ratelimit-reset", String(Math.ceil(rateLimit.resetAt / 1000)));
+    if (!rateLimit.allowed) {
+      return reply
+        .header("retry-after", String(rateLimit.retryAfterSeconds))
+        .status(429)
+        .send({
+          error: "RATE_LIMITED",
+          message: "Too many jobs submitted. Try again later.",
+        });
+    }
+
     const body =
       request.body && typeof request.body === "object" && !Array.isArray(request.body)
         ? (request.body as Record<string, unknown>)
@@ -63,6 +84,10 @@ export function registerStartJob(
     const jobId = randomUUID();
     const config = loadConfig();
     const { agentIdentifier, sellerVKey } = resolveAgentDisplayIdentity(config);
+    const continuationToken = config.hitlChatMode ? generateOpaqueToken(32) : undefined;
+    const continuationTokenHash = continuationToken
+      ? hashOpaqueToken(continuationToken)
+      : undefined;
 
     const nowSec = Math.floor(Date.now() / 1000);
     let payByTime = nowSec + config.payByOffsetSec;
@@ -143,6 +168,7 @@ export function registerStartJob(
         unlockTime,
         externalDisputeUnlockTime,
         amounts: config.priceAmounts,
+        continuation_token_hash: continuationTokenHash,
       });
 
       runWithPayment({
@@ -167,6 +193,7 @@ export function registerStartJob(
         unlockTime,
         externalDisputeUnlockTime,
         amounts: config.priceAmounts,
+        continuation_token_hash: continuationTokenHash,
       });
 
       await runDirect({
@@ -194,6 +221,7 @@ export function registerStartJob(
       externalDisputeUnlockTime: toUnixMs(externalDisputeUnlockTime),
       status: "awaiting_payment",
       amounts: config.priceAmounts,
+      continuationToken,
     };
 
     return reply.status(200).send(resBody);

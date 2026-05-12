@@ -21,6 +21,7 @@ export type NewJobInput = {
   unlockTime: number;
   externalDisputeUnlockTime: number;
   amounts: Array<{ amount: string; unit: string }>;
+  continuation_token_hash?: string;
 };
 
 /** Inserts a new job and returns the stored record with timestamps. */
@@ -54,6 +55,7 @@ export function updateJob(
       | "result"
       | "output_hash"
       | "error"
+      | "continuation_token_hash"
       | "awaiting_input_schema"
       | "awaiting_input_message"
       | "conversation"
@@ -83,6 +85,7 @@ export function setJobStatus(
       | "result"
       | "output_hash"
       | "error"
+      | "continuation_token_hash"
       | "awaiting_input_schema"
       | "awaiting_input_message"
       | "conversation"

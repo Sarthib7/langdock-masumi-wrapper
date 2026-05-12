@@ -3,8 +3,10 @@ import { buildApp } from "../src/app.js";
 import { computeInputHash } from "../src/services/hashing.js";
 import { createJob, __resetJobsForTests } from "../src/services/jobs.js";
 import { hitlInputSchema } from "../src/services/hitlChat.js";
+import { hashOpaqueToken } from "../src/services/opaqueTokens.js";
 
 const originalEnv = { ...process.env };
+const HITL_TOKEN = "test-hitl-token";
 
 describe("POST /provide_input", () => {
   beforeEach(() => {
@@ -32,6 +34,7 @@ describe("POST /provide_input", () => {
       unlockTime: 3,
       externalDisputeUnlockTime: 4,
       amounts: [],
+      continuation_token_hash: hashOpaqueToken(HITL_TOKEN),
     });
 
     const { setJobStatus } = await import("../src/services/jobs.js");
@@ -51,6 +54,7 @@ describe("POST /provide_input", () => {
       url: "/provide_input",
       payload: {
         jobId: "job-hitl-1",
+        inputToken: HITL_TOKEN,
         inputData: { message: "", finish: true },
       },
     });
@@ -69,6 +73,38 @@ describe("POST /provide_input", () => {
     expect(json.output_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(json.result).toContain("User: hello");
     expect(json.result).toContain("Lexi: hi");
+
+    await app.close();
+  });
+
+  it("rejects HITL continuation without the job continuation token", async () => {
+    createJob({
+      id: "job-hitl-token",
+      blockchainIdentifier: "direct_job-hitl-token",
+      identifierFromPurchaser: "aabbccddeeff0013",
+      input_hash: "2".repeat(64),
+      input_data: [{ key: "text", value: "hello" }],
+      status: "awaiting_input",
+      payByTime: 1,
+      submitResultTime: 2,
+      unlockTime: 3,
+      externalDisputeUnlockTime: 4,
+      amounts: [],
+      continuation_token_hash: hashOpaqueToken(HITL_TOKEN),
+    });
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/provide_input",
+      payload: {
+        jobId: "job-hitl-token",
+        inputData: { message: "continue" },
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: "HITL_TOKEN_REQUIRED" });
 
     await app.close();
   });
