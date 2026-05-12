@@ -31,6 +31,14 @@ function resetEnv(): void {
   delete process.env.PRICE_AMOUNTS;
   delete process.env.INPUT_SCHEMA_JSON;
   delete process.env.INPUT_SCHEMA_PATH;
+  delete process.env.SETUP_USERNAME;
+  delete process.env.SETUP_PASSWORD_HASH;
+  delete process.env.SETUP_PASSWORD;
+}
+
+function setAdminEnv(): void {
+  process.env.SETUP_USERNAME = "admin";
+  process.env.SETUP_PASSWORD_HASH = "$2b$12$abcdefghijklmnopqrstuuK7r2cFOP7JPrbMV7xYUq/xp1n0JRXD6";
 }
 
 describe("getReadinessReport", () => {
@@ -55,6 +63,7 @@ describe("getReadinessReport", () => {
     process.env.PAYMENT_MODE = "direct";
     process.env.LANGDOCK_API_KEY = "ld-key";
     process.env.LANGDOCK_AGENT_ID = "agent-id";
+    setAdminEnv();
     process.env.PRICE_AMOUNTS = JSON.stringify([
       { amount: "1000000", unit: PREPROD_TUSDM_UNIT },
     ]);
@@ -68,6 +77,7 @@ describe("getReadinessReport", () => {
     process.env.PAYMENT_MODE = "masumi";
     process.env.LANGDOCK_API_KEY = "ld-key";
     process.env.LANGDOCK_AGENT_ID = "agent-id";
+    setAdminEnv();
     process.env.PRICE_AMOUNTS = JSON.stringify([
       { amount: "1000000", unit: PREPROD_TUSDM_UNIT },
     ]);
@@ -142,6 +152,7 @@ describe("getReadinessReport", () => {
     process.env.PAYMENT_MODE = "masumi";
     process.env.LANGDOCK_API_KEY = "ld-key";
     process.env.LANGDOCK_AGENT_ID = "agent-id";
+    setAdminEnv();
     process.env.AGENT_IDENTIFIER = "agent-id-on-chain";
     process.env.SELLER_VKEY = "seller-vkey";
     process.env.PAYMENT_SERVICE_URL = "https://saas.example.com";
@@ -168,6 +179,7 @@ describe("getReadinessReport", () => {
     process.env.NETWORK = "Mainnet";
     process.env.LANGDOCK_API_KEY = "ld-key";
     process.env.LANGDOCK_AGENT_ID = "agent-id";
+    setAdminEnv();
     process.env.AGENT_IDENTIFIER = "agent-id-on-chain";
     process.env.SELLER_VKEY = "seller-vkey";
     process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
@@ -189,6 +201,7 @@ describe("getReadinessReport", () => {
     process.env.NETWORK = "Mainnet";
     process.env.LANGDOCK_API_KEY = "ld-key";
     process.env.LANGDOCK_AGENT_ID = "agent-id";
+    setAdminEnv();
     process.env.AGENT_IDENTIFIER = "agent-id-on-chain";
     process.env.SELLER_VKEY = "seller-vkey";
     process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
@@ -214,6 +227,7 @@ describe("getReadinessReport", () => {
     process.env.NETWORK = "Preprod";
     process.env.LANGDOCK_API_KEY = "ld-key";
     process.env.LANGDOCK_AGENT_ID = "agent-id";
+    setAdminEnv();
     process.env.AGENT_IDENTIFIER = "agent-id-on-chain";
     process.env.SELLER_VKEY = "seller-vkey";
     process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
@@ -255,6 +269,7 @@ describe("GET /ready", () => {
     process.env.PAYMENT_MODE = "direct";
     process.env.LANGDOCK_API_KEY = "ld-key";
     process.env.LANGDOCK_AGENT_ID = "agent-id";
+    setAdminEnv();
     process.env.PRICE_AMOUNTS = JSON.stringify([
       { amount: "1000000", unit: PREPROD_TUSDM_UNIT },
     ]);

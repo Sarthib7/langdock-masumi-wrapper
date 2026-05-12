@@ -8,7 +8,8 @@ It implements:
 - `GET  /`            — minimal operator setup UI for posting Langdock and
   Masumi credentials into `.env` and the running process.
 - `GET/POST /setup/config` — redacted setup status and persistent credential update.
-- Setup login UI — authenticate with either an access hash (`SETUP_ACCESS_TOKEN`) or username/password (`SETUP_USERNAME` + `SETUP_PASSWORD`).
+- Setup login UI — authenticate with admin credentials configured on the server
+  (`SETUP_USERNAME` + `SETUP_PASSWORD_HASH`, or `SETUP_PASSWORD`).
 - `GET /setup/registry/status` — polls Payment Service registry records and saves
   `AGENT_IDENTIFIER` once the registration returns one.
 - `POST /start_job`   — registers a sale on the Masumi Payment Service, returns
@@ -74,9 +75,10 @@ cp .env.example .env
 | `PRICE_AMOUNTS` | Optional dynamic `RequestedFunds` JSON array. Leave empty for fixed pricing configured in Masumi SaaS/admin. |
 | `HITL_CHAT_MODE` | Set `true` to keep paid Langdock jobs open as a chat. After each answer `/status` returns `awaiting_input`; `/provide_input` continues until the user sends `DONE`. |
 | `INPUT_SCHEMA_PATH` / `INPUT_SCHEMA_JSON` | MIP-003 schema served at `/input_schema`. |
-| `REQUIRE_PRODUCTION_CONFIG` | Set `true` to make startup fail until production env is complete. Also enforced automatically when `NODE_ENV=production` or `PAYMENT_MODE=masumi`. |
-| `SETUP_ACCESS_TOKEN` | Optional shared token required by `POST /setup/config`. Set this before exposing the setup page beyond localhost. |
-| `SETUP_USERNAME` / `SETUP_PASSWORD` | Alternative login using HTTP Basic auth. Takes precedence over `SETUP_ACCESS_TOKEN` when both are set. |
+| `REQUIRE_PRODUCTION_CONFIG` | Set `true` to make startup fail until production env is complete. Also enforced automatically when `NODE_ENV=production`. |
+| `SETUP_USERNAME` / `SETUP_PASSWORD_HASH` | Required admin login for the hosted setup UI. Browser registration is disabled. |
+| `SETUP_PASSWORD` | Plaintext fallback for admin login when your deployment secret store is private. Prefer `SETUP_PASSWORD_HASH`. |
+| `SETUP_ACCESS_TOKEN` | Optional bearer/basic API access token for setup endpoints. Admin username/password remains the browser login. |
 | `SETUP_ENV_PATH` | Optional path where `POST /setup/config` writes persistent env config. Defaults to `.env` in the current working directory. |
 
 Full list in [.env.example](.env.example).
@@ -105,9 +107,10 @@ npm run check:production
 curl -s http://localhost:3000/ready
 ```
 
-The check fails on missing Langdock credentials, missing Masumi identity/payment
-credentials in `masumi` mode, invalid payment windows, invalid dynamic pricing,
-or an empty/duplicate input schema.
+The check fails on missing admin login, missing Langdock credentials, missing
+Masumi identity/payment credentials in `masumi` mode, insecure non-local HTTP
+API URLs, invalid payment windows, invalid dynamic pricing, or an empty/duplicate
+input schema.
 
 ### Hosted setup UI
 
@@ -119,21 +122,23 @@ are not returned by `GET /setup/config` or the UI status panel. Empty secret
 fields keep their previous value so refreshing status or changing non-secret
 settings does not erase credentials.
 
-If the page is reachable by anyone except the operator, set either an access hash:
+Configure the admin login before exposing the page. Prefer a bcrypt hash:
 
 ```bash
-SETUP_ACCESS_TOKEN="change-me"
+SETUP_USERNAME="operator"
+SETUP_PASSWORD_HASH="$2b$12$..."
 ```
 
-…or username/password auth:
+For local development or a private deployment secret store, plaintext is also
+accepted:
 
 ```bash
 SETUP_USERNAME="operator"
 SETUP_PASSWORD="change-me"
 ```
 
-The setup UI login section lets you toggle between the two methods. When both are
-configured, either credential set is accepted.
+`SETUP_ACCESS_TOKEN` is still accepted as an API bearer token for setup routes,
+but the browser login does not allow public registration.
 
 The setup UI also includes **Agent slots** — up to four registration profiles saved
 in your browser's localStorage. Click a slot, fill in the registration fields, and
@@ -144,7 +149,8 @@ selected slot to the Masumi registry and auto-saves the profile afterwards.
 
 | Field | What it is for | Where to get it |
 |-------|----------------|-----------------|
-| `SETUP_ACCESS_TOKEN` | Shared secret that protects the setup UI. This is not provided by a vendor; generate it yourself. | Run `openssl rand -hex 32`, then set it in Railway Variables. See [Railway variables](https://docs.railway.com/variables). |
+| `SETUP_USERNAME` / `SETUP_PASSWORD_HASH` | Admin login for the setup UI. This is not provided by a vendor; generate it yourself. | Store them in your deployment variables. `SETUP_PASSWORD` is supported as a plaintext fallback, but a bcrypt hash is preferred. See [Railway variables](https://docs.railway.com/variables). |
+| `SETUP_ACCESS_TOKEN` | Optional API bearer token for setup endpoints. | Run `openssl rand -hex 32`, then set it in deployment variables. |
 | `LANGDOCK_API_KEY` | Server-side key used by this wrapper to call Langdock. | In Langdock workspace settings, create an API key, then share your agent with that key. See [Langdock: Sharing Agents with API Keys](https://docs.langdock.com/api-endpoints/agent/agent-api-guide). |
 | `LANGDOCK_AGENT_ID` | The Langdock agent this wrapper calls. | Open the agent in Langdock and copy the ID from the URL, e.g. `https://app.langdock.com/agents/AGENT_ID/edit`. See the same [Langdock guide](https://docs.langdock.com/api-endpoints/agent/agent-api-guide). |
 | `PAYMENT_SERVICE_URL` | Masumi Payment Service or Masumi SaaS API base URL used for payments and registry calls. | Use a URL ending in `/api/v1` for a direct payment node or `/pay/api/v1` for Masumi SaaS. See [Masumi API reference](https://docs.masumi.network/api-reference). |
@@ -200,15 +206,16 @@ curl -s -X POST http://localhost:3000/start_job \
 curl -s "http://localhost:3000/status?job_id=JOB_UUID"
 
 # HITL chat mode only: continue a job that reports status=awaiting_input.
+# Use the continuationToken returned by /start_job.
 curl -s -X POST http://localhost:3000/provide_input \
   -H "Content-Type: application/json" \
-  -d '{"job_id":"JOB_UUID","input_data":{"message":"Follow-up question"}}'
+  -d '{"job_id":"JOB_UUID","input_token":"CONTINUATION_TOKEN","input_data":{"message":"Follow-up question"}}'
 
 # Finish the HITL chat and submit the final transcript hash. The HITL schema also
 # exposes a boolean `finish` control; default/off means continue.
 curl -s -X POST http://localhost:3000/provide_input \
   -H "Content-Type: application/json" \
-  -d '{"job_id":"JOB_UUID","input_data":{"message":"","finish":true}}'
+  -d '{"job_id":"JOB_UUID","input_token":"CONTINUATION_TOKEN","input_data":{"message":"","finish":true}}'
 
 curl -s http://localhost:3000/availability
 curl -s http://localhost:3000/input_schema

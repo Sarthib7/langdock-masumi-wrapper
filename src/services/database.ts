@@ -9,7 +9,13 @@
  */
 
 import initSqlJs, { type Database as SqlJsDatabase } from "sql.js";
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 let db: SqlJsDatabase | undefined;
@@ -76,7 +82,8 @@ function save(): void {
   if (db && dbPathValue) {
     const data = db.export();
     const buffer = Buffer.from(data);
-    writeFileSync(dbPathValue, buffer);
+    writeFileSync(dbPathValue, buffer, { mode: 0o600 });
+    chmodSync(dbPathValue, 0o600);
   }
 }
 

@@ -56,6 +56,43 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+function isLocalHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "::1"].includes(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function validateHttpsUnlessLocal(
+  value: string,
+  env: string[],
+  issues: ReadinessIssue[],
+): void {
+  if (!hasValue(value) || !isHttpUrl(value)) return;
+  const url = new URL(value);
+  if (url.protocol === "https:" || isLocalHttpUrl(value)) return;
+
+  issues.push({
+    severity: "error",
+    code: "insecure_http_url",
+    env,
+    message: `${env.join(" or ")} must use HTTPS unless it points at localhost.`,
+  });
+}
+
+function setupAdminCredentialsConfigured(): boolean {
+  return Boolean(
+    hasValue(rawEnv("SETUP_USERNAME")) &&
+      (hasValue(rawEnv("SETUP_PASSWORD_HASH")) ||
+        hasValue(rawEnv("SETUP_PASSWORD"))),
+  );
+}
+
 function validatePaymentWindows(
   config: AppConfig,
   issues: ReadinessIssue[],
@@ -266,6 +303,8 @@ export function productionRequiredEnv(config: AppConfig): string[] {
     "LANGDOCK_API_KEY",
     "LANGDOCK_AGENT_ID",
     "PAYMENT_MODE",
+    "SETUP_USERNAME",
+    "SETUP_PASSWORD_HASH or SETUP_PASSWORD",
     "INPUT_SCHEMA_JSON or INPUT_SCHEMA_PATH",
   ];
   if (config.paymentMode === "masumi") {
@@ -303,6 +342,23 @@ export function getReadinessReport(config: AppConfig): ReadinessReport {
       code: "invalid_url",
       env: ["LANGDOCK_BASE_URL"],
       message: "LANGDOCK_BASE_URL must be an http(s) URL.",
+    });
+  }
+  validateHttpsUnlessLocal(config.langdockBaseUrl, ["LANGDOCK_BASE_URL"], issues);
+
+  if (!setupAdminCredentialsConfigured()) {
+    pushMissing(
+      issues,
+      ["SETUP_USERNAME", "SETUP_PASSWORD_HASH or SETUP_PASSWORD"],
+      "Admin login credentials must be configured on the server because browser registration is disabled.",
+    );
+  } else if (!hasValue(rawEnv("SETUP_PASSWORD_HASH"))) {
+    issues.push({
+      severity: "warning",
+      code: "plaintext_setup_password",
+      env: ["SETUP_PASSWORD"],
+      message:
+        "SETUP_PASSWORD_HASH is preferred so the admin password is not stored plaintext in environment files.",
     });
   }
 
@@ -344,6 +400,11 @@ export function getReadinessReport(config: AppConfig): ReadinessReport {
         message: "PAYMENT_SERVICE_URL must be an http(s) URL.",
       });
     }
+    validateHttpsUnlessLocal(
+      config.paymentServiceUrl,
+      ["PAYMENT_SERVICE_URL"],
+      issues,
+    );
     if (!hasValue(config.paymentApiKey)) {
       pushMissing(
         issues,
