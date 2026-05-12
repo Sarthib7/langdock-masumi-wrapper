@@ -28,6 +28,8 @@ import {
   type RegistryAgent,
 } from "../services/masumiPayment.js";
 import { getReadinessReport } from "../services/readiness.js";
+import { registerUser, loginUser, logoutUser, verifyToken, type AuthenticatedUser } from "../services/auth.js";
+import { loginHtml } from "./loginHtml.js";
 import { MAINNET_USDCX_UNIT, PREPROD_TUSDM_UNIT } from "../services/sokosumiTokens.js";
 
 type SetupConfigBody = {
@@ -380,7 +382,16 @@ async function persistAgentIdentifier(agentIdentifier: string): Promise<void> {
   applyEnvPatch(patch);
 }
 
-function setupHtml(): string {
+function setupHtml(user?: AuthenticatedUser | null): string {
+  const userBadge = user
+    ? `<div class="user-badge">
+        <span class="user-avatar" aria-hidden="true">${escSetupHtml((user.displayName || user.username).charAt(0).toUpperCase())}</span>
+        <span class="user-name">${escSetupHtml(user.displayName || user.username)}</span>
+        <form action="/auth/logout" method="post" style="display:inline">
+          <button type="submit" class="logout-btn secondary">Sign out</button>
+        </form>
+      </div>`
+    : '';
   return String.raw`<!doctype html>
 <html lang="en">
 <head>
@@ -689,6 +700,32 @@ function setupHtml(): string {
       white-space: nowrap;
       border: 0;
     }
+    .user-badge {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .user-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--accent-text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 14px;
+    }
+    .user-name {
+      font-size: 14px;
+      font-weight: 650;
+    }
+    .logout-btn {
+      font-size: 12px;
+      padding: 6px 10px;
+      min-height: 32px;
+    }
     @media (max-width: 820px) {
       main { width: min(100% - 24px, 720px); padding-top: 20px; }
       header, .grid, .row, .auth-grid, .agent-slots { grid-template-columns: 1fr; display: grid; }
@@ -704,6 +741,7 @@ function setupHtml(): string {
       </div>
       <span id="readyBadge" class="status">Checking</span>
     </header>
+    ${userBadge}
 
     <div class="grid">
       <section aria-labelledby="configTitle">
@@ -730,33 +768,7 @@ function setupHtml(): string {
             </div>
           </dl>
         </div>
-        <form id="configForm" novalidate>
-          <fieldset>
-            <legend>Login</legend>
-            <div class="segmented" role="radiogroup" aria-label="Setup login method">
-              <label><input type="radio" name="setupAuthMode" value="hash" checked /> Access hash</label>
-              <label><input type="radio" name="setupAuthMode" value="password" /> Username / password</label>
-            </div>
-            <div id="hashLoginFields">
-              <label>
-                Access hash
-                <input id="setupAccessToken" name="setupAccessToken" type="password" autocomplete="current-password" spellcheck="false" />
-                <span class="hint">Use SETUP_ACCESS_TOKEN. Required only when configured on the server.</span>
-              </label>
-            </div>
-            <div id="passwordLoginFields" class="auth-grid hidden">
-              <label>
-                Username
-                <input id="setupUsername" name="setupUsername" type="text" autocomplete="username" spellcheck="false" />
-              </label>
-              <label>
-                Password
-                <input id="setupPassword" name="setupPassword" type="password" autocomplete="current-password" spellcheck="false" />
-                <span class="hint">Uses SETUP_USERNAME and SETUP_PASSWORD when configured.</span>
-              </label>
-            </div>
-          </fieldset>
-
+          <form id="configForm" novalidate>
           <fieldset>
             <legend>Langdock</legend>
             <label>
@@ -962,8 +974,6 @@ function setupHtml(): string {
     const runJob = document.getElementById('runJob');
     const registerAgent = document.getElementById('registerAgent');
     const testLangdock = document.getElementById('testLangdock');
-    const hashLoginFields = document.getElementById('hashLoginFields');
-    const passwordLoginFields = document.getElementById('passwordLoginFields');
     const agentSlots = document.getElementById('agentSlots');
     const saveAgentSlot = document.getElementById('saveAgentSlot');
     const clearAgentSlot = document.getElementById('clearAgentSlot');
@@ -976,22 +986,7 @@ function setupHtml(): string {
     }
 
     function setupHeaders() {
-      const mode = formValue(configForm, 'setupAuthMode') || 'hash';
-      if (mode === 'password') {
-        const username = document.getElementById('setupUsername').value.trim();
-        const password = document.getElementById('setupPassword').value;
-        return username || password
-          ? { Authorization: 'Basic ' + btoa(username + ':' + password) }
-          : {};
-      }
-      const token = document.getElementById('setupAccessToken').value.trim();
-      return token ? { 'x-setup-token': token } : {};
-    }
-
-    function syncAuthMode() {
-      const mode = formValue(configForm, 'setupAuthMode') || 'hash';
-      hashLoginFields.classList.toggle('hidden', mode !== 'hash');
-      passwordLoginFields.classList.toggle('hidden', mode !== 'password');
+      return { };
     }
 
     function blankAgentSlot() {
@@ -1162,17 +1157,7 @@ function setupHtml(): string {
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || 'Config was rejected.');
         renderState(data);
-        const authMode = formValue(configForm, 'setupAuthMode') || 'hash';
-        const accessToken = document.getElementById('setupAccessToken').value;
-        const setupUsername = document.getElementById('setupUsername').value;
-        const setupPassword = document.getElementById('setupPassword').value;
         configForm.reset();
-        const authField = configForm.querySelector('input[name="setupAuthMode"][value="' + authMode + '"]');
-        if (authField) authField.checked = true;
-        document.getElementById('setupAccessToken').value = accessToken;
-        document.getElementById('setupUsername').value = setupUsername;
-        document.getElementById('setupPassword').value = setupPassword;
-        syncAuthMode();
         configForm.elements.langdockBaseUrl.value = payload.langdockBaseUrl || 'https://api.langdock.com';
         configForm.elements.paymentMode.value = payload.paymentMode || 'masumi';
         const networkField = configForm.querySelector('input[name="network"][value="' + (payload.network || 'Preprod') + '"]');
@@ -1191,9 +1176,6 @@ function setupHtml(): string {
     saveAgentSlot.addEventListener('click', saveCurrentAgentSlot);
     clearAgentSlot.addEventListener('click', clearCurrentAgentSlot);
     configForm.addEventListener('change', (event) => {
-      if (event.target && event.target.name === 'setupAuthMode') {
-        syncAuthMode();
-      }
       if (event.target && event.target.name === 'network') {
         registryForm.elements.pricingUnit.value = selectedNetwork() === 'Mainnet' ? MAINNET_USDCX_UNIT : PREPROD_TUSDM_UNIT;
       }
@@ -1304,7 +1286,6 @@ function setupHtml(): string {
       }
     });
 
-    syncAuthMode();
     renderAgentSlots();
     applyAgentSlot(loadAgentSlots()[selectedAgentSlot]);
     syncPricingUnit();
@@ -1314,20 +1295,113 @@ function setupHtml(): string {
 </html>`;
 }
 
+function sessionTokenFromRequest(request: FastifyRequest): string {
+  const cookie = request.headers.cookie || "";
+  const match = cookie.match(/(?:^|;\s*)session=([^;]*)/);
+  if (match) {
+    try { return decodeURIComponent(match[1]); } catch { return ""; }
+  }
+  const auth = request.headers.authorization;
+  if (auth?.startsWith("Bearer ")) return auth.slice("Bearer ".length);
+  return "";
+}
+
+function getSessionUser(request: FastifyRequest): AuthenticatedUser | null {
+  const token = sessionTokenFromRequest(request);
+  if (!token) return null;
+  return verifyToken(token);
+}
+
+function requestHasSetupAccess(request: FastifyRequest): boolean {
+  // Session-based auth
+  const user = getSessionUser(request);
+  if (user) return true;
+  // Legacy token/basic auth only when explicitly configured
+  if (setupAccessConfigured()) {
+    return requestCanConfigure(request);
+  }
+  return false;
+}
+
+function escSetupHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
-  app.get("/", async (_request, reply) => {
-    return reply.type("text/html; charset=utf-8").send(setupHtml());
+  // ── Auth routes ─────────────────────────────────────────────────────
+
+  app.get("/", async (request, reply) => {
+    const user = getSessionUser(request);
+    if (user) {
+      return reply.redirect("/dashboard");
+    }
+    return reply.type("text/html; charset=utf-8").send(loginHtml());
   });
+
+  app.get("/dashboard", async (request, reply) => {
+    const user = getSessionUser(request);
+    if (!user) {
+      // Allow legacy token auth for API users but only when explicitly configured
+      if (!setupAccessConfigured() || !requestCanConfigure(request)) {
+        return reply.redirect("/");
+      }
+    }
+    return reply.type("text/html; charset=utf-8").send(setupHtml(user));
+  });
+
+  app.post("/auth", async (request, reply) => {
+    const body =
+      request.body && typeof request.body === "object" && !Array.isArray(request.body)
+        ? (request.body as Record<string, string>)
+        : {};
+    const mode = (body.mode || "login").trim().toLowerCase();
+    const username = (body.username || "").trim();
+    const password = body.password || "";
+    const email = (body.email || "").trim();
+    const displayName = (body.displayName || "").trim();
+
+    if (!username || !password) {
+      return reply.status(400).send({ error: "MISSING_FIELDS", message: "Username and password are required." });
+    }
+
+    if (mode === "register") {
+      const result = await registerUser(username, password, email || undefined, displayName || undefined);
+      if ("error" in result) {
+        return reply.status(409).send({ error: "REGISTRATION_FAILED", message: result.error });
+      }
+      return reply.status(200).send({ ok: true, user: result.user, token: result.token });
+    }
+
+    const result = await loginUser(username, password);
+    if ("error" in result) {
+      return reply.status(401).send({ error: "LOGIN_FAILED", message: result.error });
+    }
+    return reply.status(200).send({ ok: true, user: result.user, token: result.token });
+  });
+
+  app.post("/auth/logout", async (request, reply) => {
+    const token = sessionTokenFromRequest(request);
+    if (token) logoutUser(token);
+    return reply
+      .header("set-cookie", "session=; path=/; max-age=0; SameSite=Strict")
+      .send({ ok: true });
+  });
+
+  // ── Setup API routes ───────────────────────────────────────────────
 
   app.get("/setup/config", async (_request, reply) => {
     return reply.status(200).send(redactConfigState());
   });
 
   app.post("/setup/config", async (request, reply) => {
-    if (!requestCanConfigure(request)) {
+    if (!requestHasSetupAccess(request)) {
       return reply.status(401).send({
         error: "SETUP_ACCESS_DENIED",
-        message: "A valid setup access token is required.",
+        message: "Authentication required.",
       });
     }
 
@@ -1354,10 +1428,10 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
   });
 
   app.post("/setup/langdock/test", async (request, reply) => {
-    if (!requestCanConfigure(request)) {
+    if (!requestHasSetupAccess(request)) {
       return reply.status(401).send({
         error: "SETUP_ACCESS_DENIED",
-        message: "A valid setup access token is required.",
+        message: "Authentication required.",
       });
     }
 
@@ -1410,10 +1484,10 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
   });
 
   app.post("/setup/registry/register", async (request, reply) => {
-    if (!requestCanConfigure(request)) {
+    if (!requestHasSetupAccess(request)) {
       return reply.status(401).send({
         error: "SETUP_ACCESS_DENIED",
-        message: "A valid setup access token is required.",
+        message: "Authentication required.",
       });
     }
 
@@ -1515,10 +1589,10 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
   });
 
   app.get("/setup/registry/status", async (request, reply) => {
-    if (!requestCanConfigure(request)) {
+    if (!requestHasSetupAccess(request)) {
       return reply.status(401).send({
         error: "SETUP_ACCESS_DENIED",
-        message: "A valid setup access token is required.",
+        message: "Authentication required.",
       });
     }
 

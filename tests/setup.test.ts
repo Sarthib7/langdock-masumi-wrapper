@@ -1,10 +1,11 @@
-/** Integration coverage for the hosted runtime setup UI. */
+/** Integration coverage for the hosted runtime setup UI and auth. */
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import { __resetJobsForTests } from "../src/services/jobs.js";
+import { resetDb } from "../src/services/database.js";
 
 const ORIGINAL_ENV = { ...process.env };
 let tempDir: string | undefined;
@@ -29,6 +30,32 @@ function resetEnv(): void {
   delete process.env.SETUP_USERNAME;
   delete process.env.SETUP_PASSWORD;
   delete process.env.SETUP_ENV_PATH;
+  delete process.env.DB_PATH;
+}
+
+/** Register a user and return the session token. */
+async function registerAndGetToken(
+  app: Awaited<ReturnType<typeof buildApp>>,
+  username = "testuser",
+  password = "test-password-123",
+): Promise<string> {
+  const res = await app.inject({
+    method: "POST",
+    url: "/auth",
+    payload: { mode: "register", username, password },
+  });
+  expect(res.statusCode).toBe(200);
+  return res.json().token;
+}
+
+/** Build a cookie header with a valid session token. */
+async function sessionCookie(
+  app: Awaited<ReturnType<typeof buildApp>>,
+  username?: string,
+  password?: string,
+): Promise<string> {
+  const token = await registerAndGetToken(app, username, password);
+  return `session=${encodeURIComponent(token)}`;
 }
 
 describe("setup UI", () => {
@@ -38,6 +65,7 @@ describe("setup UI", () => {
     resetEnv();
     tempDir = await mkdtemp(path.join(tmpdir(), "langdock-setup-test-"));
     process.env.SETUP_ENV_PATH = path.join(tempDir, ".env");
+    process.env.DB_PATH = path.join(tempDir, "test.db");
     __resetJobsForTests();
   });
 
@@ -45,27 +73,137 @@ describe("setup UI", () => {
     vi.unstubAllGlobals();
     globalThis.fetch = originalFetch;
     process.env = { ...ORIGINAL_ENV };
+    resetDb();
     if (tempDir) await rm(tempDir, { recursive: true, force: true });
     tempDir = undefined;
   });
 
-  it("serves a minimal operator page at /", async () => {
+  it("serves login page at / and redirects authenticated users to /dashboard", async () => {
     const app = await buildApp();
 
-    const res = await app.inject({ method: "GET", url: "/" });
+    const loginRes = await app.inject({ method: "GET", url: "/" });
+    expect(loginRes.statusCode).toBe(200);
+    expect(loginRes.headers["content-type"]).toContain("text/html");
+    expect(loginRes.body).toContain("Sign in");
+    expect(loginRes.body).toContain("Create account");
 
+    const cookie = await sessionCookie(app);
+    const dashRes = await app.inject({
+      method: "GET",
+      url: "/",
+      headers: { cookie },
+    });
+    expect(dashRes.statusCode).toBe(302);
+    expect(dashRes.headers.location).toBe("/dashboard");
+
+    await app.close();
+  });
+
+  it("serves dashboard at /dashboard for authenticated users", async () => {
+    const app = await buildApp();
+    const cookie = await sessionCookie(app);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/dashboard",
+      headers: { cookie },
+    });
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toContain("text/html");
     expect(res.body).toContain("Langdock Masumi Setup");
     expect(res.body).toContain("Credential guide");
-    expect(res.body).toContain("Access hash");
-    expect(res.body).toContain("Username / password");
     expect(res.body).toContain("Agent slots");
-    expect(res.body).toContain("saveAgentSlot");
     expect(res.body).toContain("openssl rand -hex 32");
     expect(res.body).toContain(
       "https://docs.langdock.com/api-endpoints/agent/agent-api-guide",
     );
+    // User badge should show
+    expect(res.body).toContain("testuser");
+    expect(res.body).toContain("Sign out");
+
+    await app.close();
+  });
+
+  it("redirects /dashboard to / when not authenticated", async () => {
+    const app = await buildApp();
+
+    const res = await app.inject({ method: "GET", url: "/dashboard" });
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe("/");
+
+    await app.close();
+  });
+
+  it("registers a new user and returns a session token", async () => {
+    const app = await buildApp();
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth",
+      payload: {
+        mode: "register",
+        username: "newuser",
+        password: "secure-pass-123",
+        email: "new@example.com",
+        displayName: "New User",
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.ok).toBe(true);
+    expect(body.token).toBeTruthy();
+    expect(body.user.username).toBe("newuser");
+    expect(body.user.displayName).toBe("New User");
+
+    await app.close();
+  });
+
+  it("rejects duplicate username on registration", async () => {
+    const app = await buildApp();
+
+    await registerAndGetToken(app, "dupuser");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth",
+      payload: { mode: "register", username: "dupuser", password: "other-pass-123" },
+    });
+    expect(res.statusCode).toBe(409);
+
+    await app.close();
+  });
+
+  it("logs in an existing user and returns a session token", async () => {
+    const app = await buildApp();
+    await registerAndGetToken(app, "loginuser", "my-password-123");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth",
+      payload: { mode: "login", username: "loginuser", password: "my-password-123" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.ok).toBe(true);
+    expect(body.token).toBeTruthy();
+    expect(body.user.username).toBe("loginuser");
+
+    await app.close();
+  });
+
+  it("rejects wrong password on login", async () => {
+    const app = await buildApp();
+    await registerAndGetToken(app, "wrongpwuser", "correct-password");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth",
+      payload: { mode: "login", username: "wrongpwuser", password: "wrong-password" },
+    });
+
+    expect(res.statusCode).toBe(401);
 
     await app.close();
   });
@@ -100,10 +238,12 @@ describe("setup UI", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const app = await buildApp();
+    const cookie = await sessionCookie(app);
 
     const configRes = await app.inject({
       method: "POST",
       url: "/setup/config",
+      headers: { cookie },
       payload: {
         langdockBaseUrl: "https://langdock.example.com",
         langdockApiKey: "runtime-langdock-key",
@@ -148,8 +288,7 @@ describe("setup UI", () => {
     await app.close();
   });
 
-  it("requires the setup access token when configured", async () => {
-    process.env.SETUP_ACCESS_TOKEN = "local-secret";
+  it("requires authentication on setup routes", async () => {
     const app = await buildApp();
 
     const denied = await app.inject({
@@ -159,10 +298,11 @@ describe("setup UI", () => {
     });
     expect(denied.statusCode).toBe(401);
 
+    const cookie = await sessionCookie(app);
     const allowed = await app.inject({
       method: "POST",
       url: "/setup/config",
-      headers: { "x-setup-token": "local-secret" },
+      headers: { cookie },
       payload: {
         langdockApiKey: "runtime-secret",
         langdockAgentId: "agent",
@@ -178,7 +318,30 @@ describe("setup UI", () => {
     await app.close();
   });
 
-  it("accepts setup username and password when configured", async () => {
+  it("still accepts legacy SETUP_ACCESS_TOKEN for setup routes", async () => {
+    process.env.SETUP_ACCESS_TOKEN = "legacy-secret";
+    const app = await buildApp();
+
+    const denied = await app.inject({
+      method: "POST",
+      url: "/setup/config",
+      headers: { "x-setup-token": "wrong" },
+      payload: { paymentMode: "direct" },
+    });
+    expect(denied.statusCode).toBe(401);
+
+    const allowed = await app.inject({
+      method: "POST",
+      url: "/setup/config",
+      headers: { "x-setup-token": "legacy-secret" },
+      payload: { paymentMode: "direct" },
+    });
+    expect(allowed.statusCode).toBe(200);
+
+    await app.close();
+  });
+
+  it("still accepts legacy username/password for setup routes", async () => {
     process.env.SETUP_USERNAME = "operator";
     process.env.SETUP_PASSWORD = "local-password";
     const app = await buildApp();
@@ -219,9 +382,12 @@ describe("setup UI", () => {
     process.env.PAYMENT_API_KEY = "existing-payment-secret";
 
     const app = await buildApp();
+    const cookie = await sessionCookie(app);
+
     const res = await app.inject({
       method: "POST",
       url: "/setup/config",
+      headers: { cookie },
       payload: {
         langdockApiKey: "",
         langdockAgentId: "agent",
@@ -256,9 +422,12 @@ describe("setup UI", () => {
     process.env.LANGDOCK_AGENT_ID = "runtime-agent";
 
     const app = await buildApp();
+    const cookie = await sessionCookie(app);
+
     const res = await app.inject({
       method: "POST",
       url: "/setup/langdock/test",
+      headers: { cookie },
       payload: { prompt: "ping" },
     });
 
@@ -314,9 +483,12 @@ describe("setup UI", () => {
     process.env.NETWORK = "Preprod";
 
     const app = await buildApp();
+    const cookie = await sessionCookie(app);
+
     const res = await app.inject({
       method: "POST",
       url: "/setup/registry/register",
+      headers: { cookie },
       payload: {
         agentName: "Langdock Agent",
         agentDescription: "Agent for Langdock test jobs",
@@ -377,9 +549,12 @@ describe("setup UI", () => {
     process.env.REGISTRY_AGENT_API_BASE_URL = "https://agent.example.com";
 
     const app = await buildApp();
+    const cookie = await sessionCookie(app);
+
     const res = await app.inject({
       method: "GET",
       url: "/setup/registry/status",
+      headers: { cookie },
     });
 
     expect(res.statusCode).toBe(200);
