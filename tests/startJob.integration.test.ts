@@ -15,6 +15,7 @@ describe("POST /start_job in direct mode with mocked Langdock", () => {
     delete process.env.NETWORK;
     delete process.env.MASUMI_PAYMENT_SERVICE_URL;
     delete process.env.MASUMI_PAYMENT_SERVICE_TOKEN;
+    delete process.env.NODE_ENV;
 
     vi.stubGlobal(
       "fetch",
@@ -38,6 +39,10 @@ describe("POST /start_job in direct mode with mocked Langdock", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     globalThis.fetch = originalFetch;
+    delete process.env.NODE_ENV;
+    delete process.env.LANGDOCK_API_KEY;
+    delete process.env.LANGDOCK_AGENT_ID;
+    delete process.env.PAYMENT_MODE;
   });
 
   it("returns 200 and stores result for default Langdock handler", async () => {
@@ -94,6 +99,8 @@ describe("POST /start_job in direct mode with mocked Langdock", () => {
   it("accepts legacy object-form input_data and exposes it as an array to handlers", async () => {
     delete process.env.LANGDOCK_API_KEY;
     delete process.env.LANGDOCK_AGENT_ID;
+    process.env.LANGDOCK_API_KEY = "custom-test-key";
+    process.env.LANGDOCK_AGENT_ID = "custom-test-agent";
 
     const endpointHandler = new AgentEndpointHandler();
     endpointHandler.setStartJobHandler(async (_id, input) => ({
@@ -123,6 +130,28 @@ describe("POST /start_job in direct mode with mocked Langdock", () => {
     };
     expect(body.result.receivedArray).toBe(true);
     expect(body.result.items).toEqual([{ key: "foo", value: 1 }]);
+
+    await app.close();
+  });
+
+  it("blocks direct mode job execution in production", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.PAYMENT_MODE = "direct";
+    process.env.LANGDOCK_API_KEY = "test-key";
+    process.env.LANGDOCK_AGENT_ID = "test-agent";
+    const app = await buildApp();
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/start_job",
+      payload: {
+        identifier_from_purchaser: "job-1",
+        input_data: [{ key: "text", value: "ping" }],
+      },
+    });
+
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: string }).error).toBe("DIRECT_MODE_DISABLED");
 
     await app.close();
   });

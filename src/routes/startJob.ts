@@ -83,6 +83,19 @@ export function registerStartJob(
 
     const jobId = randomUUID();
     const config = loadConfig();
+    if (process.env.NODE_ENV === "production" && config.paymentMode === "direct") {
+      return reply.status(503).send({
+        error: "DIRECT_MODE_DISABLED",
+        message: "Production deployments must use PAYMENT_MODE=masumi.",
+      });
+    }
+    if (!config.langdockApiKey || !config.langdockAgentId) {
+      return reply.status(503).send({
+        error: "LANGDOCK_NOT_CONFIGURED",
+        message:
+          "LANGDOCK_API_KEY and LANGDOCK_AGENT_ID are required before starting paid jobs.",
+      });
+    }
     const { agentIdentifier, sellerVKey } = resolveAgentDisplayIdentity(config);
     const continuationToken = config.hitlChatMode ? generateOpaqueToken(32) : undefined;
     const continuationTokenHash = continuationToken

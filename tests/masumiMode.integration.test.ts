@@ -37,6 +37,8 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
     process.env.SELLER_VKEY = "addr_test1xyz";
     process.env.PAYMENT_SERVICE_URL = "http://payment.test/api/v1";
     process.env.PAYMENT_API_KEY = "secret";
+    process.env.LANGDOCK_API_KEY = "test-key";
+    process.env.LANGDOCK_AGENT_ID = "test-agent";
     process.env.NETWORK = "Preprod";
     process.env.PAYMENT_POLL_INTERVAL_MS = "10";
     process.env.PAYMENT_POLL_TIMEOUT_MS = "2000";
@@ -51,6 +53,8 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
     delete process.env.SELLER_VKEY;
     delete process.env.PAYMENT_SERVICE_URL;
     delete process.env.PAYMENT_API_KEY;
+    delete process.env.LANGDOCK_API_KEY;
+    delete process.env.LANGDOCK_AGENT_ID;
     delete process.env.NETWORK;
     delete process.env.PAYMENT_POLL_INTERVAL_MS;
     delete process.env.PAYMENT_POLL_TIMEOUT_MS;

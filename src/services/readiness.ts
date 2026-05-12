@@ -441,10 +441,7 @@ export function getReadinessReport(config: AppConfig): ReadinessReport {
 
 export function shouldEnforceProductionReadiness(config: AppConfig): boolean {
   void config;
-  return (
-    process.env.REQUIRE_PRODUCTION_CONFIG === "true" ||
-    process.env.NODE_ENV === "production"
-  );
+  return process.env.REQUIRE_PRODUCTION_CONFIG === "true";
 }
 
 export function assertProductionReady(config: AppConfig): void {
