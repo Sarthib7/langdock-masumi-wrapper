@@ -231,14 +231,55 @@ function tokenFromRequest(request: FastifyRequest): string {
   return "";
 }
 
+function basicCredentialsFromRequest(request: FastifyRequest): {
+  username: string;
+  password: string;
+} | undefined {
+  const headerUsername = request.headers["x-setup-username"];
+  const headerPassword = request.headers["x-setup-password"];
+  if (typeof headerUsername === "string" && typeof headerPassword === "string") {
+    return { username: headerUsername, password: headerPassword };
+  }
+
+  const auth = request.headers.authorization;
+  if (!auth?.startsWith("Basic ")) return undefined;
+  try {
+    const decoded = Buffer.from(auth.slice("Basic ".length), "base64").toString("utf8");
+    const separator = decoded.indexOf(":");
+    if (separator < 0) return undefined;
+    return {
+      username: decoded.slice(0, separator),
+      password: decoded.slice(separator + 1),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function setupAccessConfigured(): boolean {
-  return Boolean(process.env.SETUP_ACCESS_TOKEN?.trim());
+  return Boolean(
+    process.env.SETUP_ACCESS_TOKEN?.trim() ||
+      (process.env.SETUP_USERNAME?.trim() && process.env.SETUP_PASSWORD?.trim()),
+  );
 }
 
 function requestCanConfigure(request: FastifyRequest): boolean {
-  const expected = process.env.SETUP_ACCESS_TOKEN?.trim();
-  if (!expected) return true;
-  return tokenFromRequest(request) === expected;
+  const expectedToken = process.env.SETUP_ACCESS_TOKEN?.trim();
+  if (expectedToken && tokenFromRequest(request) === expectedToken) return true;
+
+  const expectedUsername = process.env.SETUP_USERNAME?.trim();
+  const expectedPassword = process.env.SETUP_PASSWORD?.trim();
+  if (expectedUsername && expectedPassword) {
+    const credentials = basicCredentialsFromRequest(request);
+    if (
+      credentials?.username === expectedUsername &&
+      credentials.password === expectedPassword
+    ) {
+      return true;
+    }
+  }
+
+  return !expectedToken && !(expectedUsername && expectedPassword);
 }
 
 function redactConfigState(): Record<string, unknown> {
@@ -248,6 +289,10 @@ function redactConfigState(): Record<string, unknown> {
     ready: report.status === "ready",
     report,
     setupAccessRequired: setupAccessConfigured(),
+    accessMethods: {
+      hash: Boolean(process.env.SETUP_ACCESS_TOKEN?.trim()),
+      password: Boolean(process.env.SETUP_USERNAME?.trim() && process.env.SETUP_PASSWORD?.trim()),
+    },
     configured: {
       langdockBaseUrl: config.langdockBaseUrl,
       langdockApiKey: config.langdockApiKey.length > 0,
@@ -516,6 +561,39 @@ function setupHtml(): string {
       flex-wrap: wrap;
       align-items: center;
     }
+    .auth-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .hidden { display: none !important; }
+    .agent-slots {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .slot-card {
+      min-height: auto;
+      display: grid;
+      gap: 4px;
+      padding: 10px;
+      text-align: left;
+      background: transparent;
+      color: var(--text);
+      border-color: var(--border);
+      font-weight: 650;
+    }
+    .slot-card[aria-pressed="true"] {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent), transparent 75%);
+    }
+    .slot-card small {
+      color: var(--muted);
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .status {
       display: inline-flex;
       align-items: center;
@@ -613,7 +691,7 @@ function setupHtml(): string {
     }
     @media (max-width: 820px) {
       main { width: min(100% - 24px, 720px); padding-top: 20px; }
-      header, .grid, .row { grid-template-columns: 1fr; display: grid; }
+      header, .grid, .row, .auth-grid, .agent-slots { grid-template-columns: 1fr; display: grid; }
     }
   </style>
 </head>
@@ -654,12 +732,29 @@ function setupHtml(): string {
         </div>
         <form id="configForm" novalidate>
           <fieldset>
-            <legend>Access</legend>
-            <label>
-              Setup access token
-              <input id="setupAccessToken" name="setupAccessToken" type="password" autocomplete="current-password" spellcheck="false" />
-              <span class="hint">Required only when SETUP_ACCESS_TOKEN is configured on the server.</span>
-            </label>
+            <legend>Login</legend>
+            <div class="segmented" role="radiogroup" aria-label="Setup login method">
+              <label><input type="radio" name="setupAuthMode" value="hash" checked /> Access hash</label>
+              <label><input type="radio" name="setupAuthMode" value="password" /> Username / password</label>
+            </div>
+            <div id="hashLoginFields">
+              <label>
+                Access hash
+                <input id="setupAccessToken" name="setupAccessToken" type="password" autocomplete="current-password" spellcheck="false" />
+                <span class="hint">Use SETUP_ACCESS_TOKEN. Required only when configured on the server.</span>
+              </label>
+            </div>
+            <div id="passwordLoginFields" class="auth-grid hidden">
+              <label>
+                Username
+                <input id="setupUsername" name="setupUsername" type="text" autocomplete="username" spellcheck="false" />
+              </label>
+              <label>
+                Password
+                <input id="setupPassword" name="setupPassword" type="password" autocomplete="current-password" spellcheck="false" />
+                <span class="hint">Uses SETUP_USERNAME and SETUP_PASSWORD when configured.</span>
+              </label>
+            </div>
           </fieldset>
 
           <fieldset>
@@ -750,6 +845,18 @@ function setupHtml(): string {
           <ul id="issues"></ul>
         </div>
         <pre id="stateOutput" aria-label="Redacted configuration state">{}</pre>
+
+        <div class="stack" aria-labelledby="agentSlotsTitle">
+          <div>
+            <h3 id="agentSlotsTitle">Agent slots</h3>
+            <p class="hint">Save up to four registration profiles locally in this browser, then register each one.</p>
+          </div>
+          <div id="agentSlots" class="agent-slots" role="list" aria-label="Agent registration slots"></div>
+          <div class="actions">
+            <button id="saveAgentSlot" class="secondary" type="button">Save current slot</button>
+            <button id="clearAgentSlot" class="secondary" type="button">Clear slot</button>
+          </div>
+        </div>
 
         <form id="registryForm" class="stack">
           <h3>Register on Masumi</h3>
@@ -855,6 +962,13 @@ function setupHtml(): string {
     const runJob = document.getElementById('runJob');
     const registerAgent = document.getElementById('registerAgent');
     const testLangdock = document.getElementById('testLangdock');
+    const hashLoginFields = document.getElementById('hashLoginFields');
+    const passwordLoginFields = document.getElementById('passwordLoginFields');
+    const agentSlots = document.getElementById('agentSlots');
+    const saveAgentSlot = document.getElementById('saveAgentSlot');
+    const clearAgentSlot = document.getElementById('clearAgentSlot');
+    const slotStorageKey = 'langdock-masumi-wrapper.agentSlots.v1';
+    let selectedAgentSlot = 0;
 
     function formValue(form, name) {
       const field = form.elements[name];
@@ -862,8 +976,118 @@ function setupHtml(): string {
     }
 
     function setupHeaders() {
+      const mode = formValue(configForm, 'setupAuthMode') || 'hash';
+      if (mode === 'password') {
+        const username = document.getElementById('setupUsername').value.trim();
+        const password = document.getElementById('setupPassword').value;
+        return username || password
+          ? { Authorization: 'Basic ' + btoa(username + ':' + password) }
+          : {};
+      }
       const token = document.getElementById('setupAccessToken').value.trim();
       return token ? { 'x-setup-token': token } : {};
+    }
+
+    function syncAuthMode() {
+      const mode = formValue(configForm, 'setupAuthMode') || 'hash';
+      hashLoginFields.classList.toggle('hidden', mode !== 'hash');
+      passwordLoginFields.classList.toggle('hidden', mode !== 'password');
+    }
+
+    function blankAgentSlot() {
+      return {
+        agentApiBaseUrl: '',
+        agentName: '',
+        agentDescription: '',
+        capabilityName: 'langdock-agent',
+        capabilityVersion: '1.0.0',
+        authorName: '',
+        authorContactEmail: '',
+        authorOrganization: '',
+        tags: 'langdock,masumi',
+        pricingAmount: '1000000',
+        pricingUnit: ''
+      };
+    }
+
+    function loadAgentSlots() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(slotStorageKey) || '[]');
+        if (Array.isArray(parsed)) {
+          return Array.from({ length: 4 }, (_, index) => Object.assign(blankAgentSlot(), parsed[index] || {}));
+        }
+      } catch {
+        // Ignore corrupt local storage and reset below.
+      }
+      return Array.from({ length: 4 }, blankAgentSlot);
+    }
+
+    function saveAgentSlots(slots) {
+      localStorage.setItem(slotStorageKey, JSON.stringify(slots.slice(0, 4)));
+    }
+
+    function currentRegistryPayload() {
+      return {
+        agentApiBaseUrl: formValue(registryForm, 'agentApiBaseUrl'),
+        agentName: formValue(registryForm, 'agentName'),
+        agentDescription: formValue(registryForm, 'agentDescription'),
+        capabilityName: formValue(registryForm, 'capabilityName'),
+        capabilityVersion: formValue(registryForm, 'capabilityVersion'),
+        authorName: formValue(registryForm, 'authorName'),
+        authorContactEmail: formValue(registryForm, 'authorContactEmail'),
+        authorOrganization: formValue(registryForm, 'authorOrganization'),
+        tags: formValue(registryForm, 'tags'),
+        pricingAmount: formValue(registryForm, 'pricingAmount'),
+        pricingUnit: formValue(registryForm, 'pricingUnit')
+      };
+    }
+
+    function applyAgentSlot(slot) {
+      const data = Object.assign(blankAgentSlot(), slot || {});
+      for (const [key, value] of Object.entries(data)) {
+        if (registryForm.elements[key]) registryForm.elements[key].value = value;
+      }
+      syncPricingUnit();
+    }
+
+    function renderAgentSlots() {
+      const slots = loadAgentSlots();
+      agentSlots.innerHTML = '';
+      slots.forEach((slot, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'slot-card';
+        button.setAttribute('role', 'listitem');
+        button.setAttribute('aria-pressed', String(index === selectedAgentSlot));
+        const title = document.createElement('span');
+        title.textContent = 'Agent ' + (index + 1) + ': ' + (slot.agentName || 'Empty agent');
+        const subtitle = document.createElement('small');
+        subtitle.textContent = slot.agentApiBaseUrl || 'No public URL saved';
+        button.append(title, subtitle);
+        button.addEventListener('click', () => {
+          selectedAgentSlot = index;
+          applyAgentSlot(slots[index]);
+          renderAgentSlots();
+        });
+        agentSlots.appendChild(button);
+      });
+    }
+
+    function saveCurrentAgentSlot() {
+      const slots = loadAgentSlots();
+      slots[selectedAgentSlot] = currentRegistryPayload();
+      saveAgentSlots(slots);
+      renderAgentSlots();
+      setMessage(registryMessage, 'Saved agent ' + (selectedAgentSlot + 1) + ' locally.', 'success');
+    }
+
+    function clearCurrentAgentSlot() {
+      const slots = loadAgentSlots();
+      slots[selectedAgentSlot] = blankAgentSlot();
+      saveAgentSlots(slots);
+      applyAgentSlot(slots[selectedAgentSlot]);
+      renderAgentSlots();
+      setMessage(registryMessage, 'Cleared agent ' + (selectedAgentSlot + 1) + '.', 'success');
     }
 
     function setMessage(node, text, kind) {
@@ -938,7 +1162,17 @@ function setupHtml(): string {
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || 'Config was rejected.');
         renderState(data);
+        const authMode = formValue(configForm, 'setupAuthMode') || 'hash';
+        const accessToken = document.getElementById('setupAccessToken').value;
+        const setupUsername = document.getElementById('setupUsername').value;
+        const setupPassword = document.getElementById('setupPassword').value;
         configForm.reset();
+        const authField = configForm.querySelector('input[name="setupAuthMode"][value="' + authMode + '"]');
+        if (authField) authField.checked = true;
+        document.getElementById('setupAccessToken').value = accessToken;
+        document.getElementById('setupUsername').value = setupUsername;
+        document.getElementById('setupPassword').value = setupPassword;
+        syncAuthMode();
         configForm.elements.langdockBaseUrl.value = payload.langdockBaseUrl || 'https://api.langdock.com';
         configForm.elements.paymentMode.value = payload.paymentMode || 'masumi';
         const networkField = configForm.querySelector('input[name="network"][value="' + (payload.network || 'Preprod') + '"]');
@@ -954,7 +1188,12 @@ function setupHtml(): string {
     });
 
     document.getElementById('refreshState').addEventListener('click', refreshState);
+    saveAgentSlot.addEventListener('click', saveCurrentAgentSlot);
+    clearAgentSlot.addEventListener('click', clearCurrentAgentSlot);
     configForm.addEventListener('change', (event) => {
+      if (event.target && event.target.name === 'setupAuthMode') {
+        syncAuthMode();
+      }
       if (event.target && event.target.name === 'network') {
         registryForm.elements.pricingUnit.value = selectedNetwork() === 'Mainnet' ? MAINNET_USDCX_UNIT : PREPROD_TUSDM_UNIT;
       }
@@ -1006,7 +1245,8 @@ function setupHtml(): string {
         const data = await res.json();
         registryOutput.textContent = JSON.stringify(data, null, 2);
         if (!res.ok) throw new Error(data.message || 'Registration failed.');
-        setMessage(registryMessage, 'Registration submitted. Confirmation can take several minutes.', 'success');
+        saveCurrentAgentSlot();
+        setMessage(registryMessage, 'Registration submitted for agent ' + (selectedAgentSlot + 1) + '. Confirmation can take several minutes.', 'success');
         await refreshState();
       } catch (err) {
         setMessage(registryMessage, err instanceof Error ? err.message : 'Could not register agent.', 'error');
@@ -1064,6 +1304,9 @@ function setupHtml(): string {
       }
     });
 
+    syncAuthMode();
+    renderAgentSlots();
+    applyAgentSlot(loadAgentSlots()[selectedAgentSlot]);
     syncPricingUnit();
     refreshState();
   </script>

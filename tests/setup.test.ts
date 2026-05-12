@@ -26,6 +26,8 @@ function resetEnv(): void {
   delete process.env.SELLER_VKEY;
   delete process.env.PRICE_AMOUNTS;
   delete process.env.SETUP_ACCESS_TOKEN;
+  delete process.env.SETUP_USERNAME;
+  delete process.env.SETUP_PASSWORD;
   delete process.env.SETUP_ENV_PATH;
 }
 
@@ -56,6 +58,10 @@ describe("setup UI", () => {
     expect(res.headers["content-type"]).toContain("text/html");
     expect(res.body).toContain("Langdock Masumi Setup");
     expect(res.body).toContain("Credential guide");
+    expect(res.body).toContain("Access hash");
+    expect(res.body).toContain("Username / password");
+    expect(res.body).toContain("Agent slots");
+    expect(res.body).toContain("saveAgentSlot");
     expect(res.body).toContain("openssl rand -hex 32");
     expect(res.body).toContain(
       "https://docs.langdock.com/api-endpoints/agent/agent-api-guide",
@@ -168,6 +174,34 @@ describe("setup UI", () => {
     await expect(readFile(process.env.SETUP_ENV_PATH!, "utf8")).resolves.toContain(
       "LANGDOCK_API_KEY=runtime-secret",
     );
+
+    await app.close();
+  });
+
+  it("accepts setup username and password when configured", async () => {
+    process.env.SETUP_USERNAME = "operator";
+    process.env.SETUP_PASSWORD = "local-password";
+    const app = await buildApp();
+
+    const denied = await app.inject({
+      method: "POST",
+      url: "/setup/config",
+      headers: {
+        authorization: `Basic ${Buffer.from("operator:wrong").toString("base64")}`,
+      },
+      payload: { paymentMode: "direct" },
+    });
+    expect(denied.statusCode).toBe(401);
+
+    const allowed = await app.inject({
+      method: "POST",
+      url: "/setup/config",
+      headers: {
+        authorization: `Basic ${Buffer.from("operator:local-password").toString("base64")}`,
+      },
+      payload: { paymentMode: "direct" },
+    });
+    expect(allowed.statusCode).toBe(200);
 
     await app.close();
   });
