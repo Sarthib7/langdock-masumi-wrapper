@@ -27,6 +27,7 @@ import {
   MasumiPaymentClient,
   MasumiPaymentError,
   type RegistryAgent,
+  type RegistryExampleOutput,
 } from "../services/masumiPayment.js";
 import { getReadinessReport } from "../services/readiness.js";
 import {
@@ -73,6 +74,7 @@ type RegistrySetupBody = {
   tags?: unknown;
   pricingAmount?: unknown;
   pricingUnit?: unknown;
+  exampleOutputs?: unknown;
   legalPrivacyPolicy?: unknown;
   legalTerms?: unknown;
   legalOther?: unknown;
@@ -123,6 +125,54 @@ function normalizeJsonEnv(value: unknown, envName: string): string | undefined {
   }
 }
 
+function normalizeRegistryExampleOutputs(
+  value: unknown,
+): RegistryExampleOutput[] | undefined {
+  if (value === undefined || value === null) return undefined;
+
+  const raw = str(value);
+  if (raw !== undefined && raw === "") return undefined;
+
+  let parsed: unknown;
+  if (Array.isArray(value)) {
+    parsed = value;
+  } else if (raw !== undefined) {
+    try {
+      parsed = JSON.parse(raw) as unknown;
+    } catch {
+      throw new Error(
+        "Example outputs must be valid JSON array of {name, url, mimeType}.",
+      );
+    }
+  } else {
+    throw new Error(
+      "Example outputs must be valid JSON array of {name, url, mimeType}.",
+    );
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error(
+      "Example outputs must be a JSON array of {name, url, mimeType}.",
+    );
+  }
+
+  return parsed.map((item, index) => {
+    if (!item || typeof item !== "object") {
+      throw new Error(`Example output ${index + 1} must be an object.`);
+    }
+    const record = item as Record<string, unknown>;
+    const name = str(record.name);
+    const url = str(record.url);
+    const mimeType = str(record.mimeType);
+    if (!name || !url || !mimeType) {
+      throw new Error(
+        `Example output ${index + 1} requires name, url, and mimeType.`,
+      );
+    }
+    return { name, url, mimeType };
+  });
+}
+
 function splitCsv(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value
@@ -167,6 +217,21 @@ function setPatchValue(
 ): void {
   if (value === undefined) return;
   if (value === "") return;
+  patch.deletes.delete(envName);
+  patch.updates.set(envName, value);
+}
+
+function setOptionalPatchValue(
+  patch: EnvPatch,
+  envName: string,
+  value: string | undefined,
+): void {
+  if (value === undefined) return;
+  if (value === "") {
+    patch.updates.delete(envName);
+    patch.deletes.add(envName);
+    return;
+  }
   patch.deletes.delete(envName);
   patch.updates.set(envName, value);
 }
@@ -373,6 +438,24 @@ function redactConfigState(): Record<string, unknown> {
       priceAmountsCount: config.priceAmounts.length,
       setupEnvPath: setupEnvPath(),
     },
+    registry: {
+      agentApiBaseUrl: process.env.REGISTRY_AGENT_API_BASE_URL ?? "",
+      agentName: process.env.REGISTRY_AGENT_NAME ?? "",
+      agentDescription: process.env.REGISTRY_AGENT_DESCRIPTION ?? "",
+      capabilityName: process.env.REGISTRY_CAPABILITY_NAME ?? "",
+      capabilityVersion: process.env.REGISTRY_CAPABILITY_VERSION ?? "",
+      authorName: process.env.REGISTRY_AUTHOR_NAME ?? "",
+      authorContactEmail: process.env.REGISTRY_AUTHOR_CONTACT_EMAIL ?? "",
+      authorContactOther: process.env.REGISTRY_AUTHOR_CONTACT_OTHER ?? "",
+      authorOrganization: process.env.REGISTRY_AUTHOR_ORGANIZATION ?? "",
+      tags: process.env.REGISTRY_TAGS ?? "",
+      pricingAmount: process.env.REGISTRY_PRICING_AMOUNT ?? "",
+      pricingUnit: process.env.REGISTRY_PRICING_UNIT ?? "",
+      exampleOutputs: process.env.REGISTRY_EXAMPLE_OUTPUTS ?? "",
+      legalPrivacyPolicy: process.env.REGISTRY_LEGAL_PRIVACY_POLICY ?? "",
+      legalTerms: process.env.REGISTRY_LEGAL_TERMS ?? "",
+      legalOther: process.env.REGISTRY_LEGAL_OTHER ?? "",
+    },
   };
 }
 
@@ -402,23 +485,33 @@ function buildEnvPatch(body: SetupConfigBody): EnvPatch {
   return patch;
 }
 
-function registryEnvPatch(body: RegistrySetupBody): EnvPatch {
+function registryEnvPatch(
+  body: RegistrySetupBody,
+  exampleOutputs: RegistryExampleOutput[] | undefined,
+): EnvPatch {
   const patch: EnvPatch = { updates: new Map(), deletes: new Set() };
-  setPatchValue(patch, "REGISTRY_AGENT_NAME", str(body.agentName));
-  setPatchValue(patch, "REGISTRY_AGENT_DESCRIPTION", str(body.agentDescription));
-  setPatchValue(patch, "REGISTRY_AGENT_API_BASE_URL", str(body.agentApiBaseUrl));
-  setPatchValue(patch, "REGISTRY_CAPABILITY_NAME", str(body.capabilityName));
-  setPatchValue(patch, "REGISTRY_CAPABILITY_VERSION", str(body.capabilityVersion));
-  setPatchValue(patch, "REGISTRY_AUTHOR_NAME", str(body.authorName));
-  setPatchValue(patch, "REGISTRY_AUTHOR_CONTACT_EMAIL", str(body.authorContactEmail));
-  setPatchValue(patch, "REGISTRY_AUTHOR_CONTACT_OTHER", str(body.authorContactOther));
-  setPatchValue(patch, "REGISTRY_AUTHOR_ORGANIZATION", str(body.authorOrganization));
-  setPatchValue(patch, "REGISTRY_TAGS", splitCsv(body.tags).join(","));
-  setPatchValue(patch, "REGISTRY_PRICING_AMOUNT", str(body.pricingAmount));
-  setPatchValue(patch, "REGISTRY_PRICING_UNIT", str(body.pricingUnit));
-  setPatchValue(patch, "REGISTRY_LEGAL_PRIVACY_POLICY", str(body.legalPrivacyPolicy));
-  setPatchValue(patch, "REGISTRY_LEGAL_TERMS", str(body.legalTerms));
-  setPatchValue(patch, "REGISTRY_LEGAL_OTHER", str(body.legalOther));
+  setOptionalPatchValue(patch, "REGISTRY_AGENT_NAME", str(body.agentName));
+  setOptionalPatchValue(patch, "REGISTRY_AGENT_DESCRIPTION", str(body.agentDescription));
+  setOptionalPatchValue(patch, "REGISTRY_AGENT_API_BASE_URL", str(body.agentApiBaseUrl));
+  setOptionalPatchValue(patch, "REGISTRY_CAPABILITY_NAME", str(body.capabilityName));
+  setOptionalPatchValue(patch, "REGISTRY_CAPABILITY_VERSION", str(body.capabilityVersion));
+  setOptionalPatchValue(patch, "REGISTRY_AUTHOR_NAME", str(body.authorName));
+  setOptionalPatchValue(patch, "REGISTRY_AUTHOR_CONTACT_EMAIL", str(body.authorContactEmail));
+  setOptionalPatchValue(patch, "REGISTRY_AUTHOR_CONTACT_OTHER", str(body.authorContactOther));
+  setOptionalPatchValue(patch, "REGISTRY_AUTHOR_ORGANIZATION", str(body.authorOrganization));
+  setOptionalPatchValue(patch, "REGISTRY_TAGS", splitCsv(body.tags).join(","));
+  setOptionalPatchValue(patch, "REGISTRY_PRICING_AMOUNT", str(body.pricingAmount));
+  setOptionalPatchValue(patch, "REGISTRY_PRICING_UNIT", str(body.pricingUnit));
+  if (body.exampleOutputs !== undefined) {
+    setOptionalPatchValue(
+      patch,
+      "REGISTRY_EXAMPLE_OUTPUTS",
+      exampleOutputs ? JSON.stringify(exampleOutputs) : "",
+    );
+  }
+  setOptionalPatchValue(patch, "REGISTRY_LEGAL_PRIVACY_POLICY", str(body.legalPrivacyPolicy));
+  setOptionalPatchValue(patch, "REGISTRY_LEGAL_TERMS", str(body.legalTerms));
+  setOptionalPatchValue(patch, "REGISTRY_LEGAL_OTHER", str(body.legalOther));
   return patch;
 }
 
@@ -986,8 +1079,31 @@ function setupHtml(user?: AuthenticatedUser | null): string {
             </label>
           </div>
           <label>
+            Author contact
+            <input name="authorContactOther" type="text" autocomplete="off" />
+          </label>
+          <label>
             Organization
             <input name="authorOrganization" type="text" autocomplete="organization" />
+          </label>
+          <label>
+            Example outputs
+            <textarea name="exampleOutputs" spellcheck="false" placeholder='[{"name":"Sample report","url":"https://example.com/report.pdf","mimeType":"application/pdf"}]'></textarea>
+            <span class="hint">Optional JSON array of public sample output links.</span>
+          </label>
+          <div class="row">
+            <label>
+              Privacy policy URL
+              <input name="legalPrivacyPolicy" type="url" inputmode="url" autocomplete="url" />
+            </label>
+            <label>
+              Terms URL
+              <input name="legalTerms" type="url" inputmode="url" autocomplete="url" />
+            </label>
+          </div>
+          <label>
+            Legal notes
+            <textarea name="legalOther" spellcheck="false"></textarea>
           </label>
           <div class="actions">
             <button id="registerAgent" type="submit">Register agent</button>
@@ -1043,6 +1159,7 @@ function setupHtml(user?: AuthenticatedUser | null): string {
     const clearAgentSlot = document.getElementById('clearAgentSlot');
     const slotStorageKey = 'langdock-masumi-wrapper.agentSlots.v1';
     let selectedAgentSlot = 0;
+    let registryEnvLoaded = false;
 
     function formValue(form, name) {
       const field = form.elements[name];
@@ -1062,10 +1179,15 @@ function setupHtml(user?: AuthenticatedUser | null): string {
         capabilityVersion: '1.0.0',
         authorName: '',
         authorContactEmail: '',
+        authorContactOther: '',
         authorOrganization: '',
         tags: 'langdock,masumi',
         pricingAmount: '1000000',
-        pricingUnit: ''
+        pricingUnit: '',
+        exampleOutputs: '',
+        legalPrivacyPolicy: '',
+        legalTerms: '',
+        legalOther: ''
       };
     }
 
@@ -1094,10 +1216,15 @@ function setupHtml(user?: AuthenticatedUser | null): string {
         capabilityVersion: formValue(registryForm, 'capabilityVersion'),
         authorName: formValue(registryForm, 'authorName'),
         authorContactEmail: formValue(registryForm, 'authorContactEmail'),
+        authorContactOther: formValue(registryForm, 'authorContactOther'),
         authorOrganization: formValue(registryForm, 'authorOrganization'),
         tags: formValue(registryForm, 'tags'),
         pricingAmount: formValue(registryForm, 'pricingAmount'),
-        pricingUnit: formValue(registryForm, 'pricingUnit')
+        pricingUnit: formValue(registryForm, 'pricingUnit'),
+        exampleOutputs: formValue(registryForm, 'exampleOutputs'),
+        legalPrivacyPolicy: formValue(registryForm, 'legalPrivacyPolicy'),
+        legalTerms: formValue(registryForm, 'legalTerms'),
+        legalOther: formValue(registryForm, 'legalOther')
       };
     }
 
@@ -1130,6 +1257,26 @@ function setupHtml(user?: AuthenticatedUser | null): string {
         });
         agentSlots.appendChild(button);
       });
+    }
+
+    function isMeaningfullyBlankAgentSlot(slot) {
+      return !slot.agentApiBaseUrl && !slot.agentName && !slot.agentDescription && !slot.authorName;
+    }
+
+    function applyRegistryStateOnce(registry) {
+      if (registryEnvLoaded || !registry || typeof registry !== 'object') return;
+      registryEnvLoaded = true;
+      const serverSlot = blankAgentSlot();
+      for (const [key, value] of Object.entries(registry)) {
+        if (typeof value === 'string' && value.trim()) serverSlot[key] = value;
+      }
+      if (!serverSlot.agentApiBaseUrl && !serverSlot.agentName && !serverSlot.agentDescription) return;
+      const slots = loadAgentSlots();
+      if (!isMeaningfullyBlankAgentSlot(slots[selectedAgentSlot] || {})) return;
+      slots[selectedAgentSlot] = serverSlot;
+      saveAgentSlots(slots);
+      applyAgentSlot(serverSlot);
+      renderAgentSlots();
     }
 
     function saveCurrentAgentSlot() {
@@ -1167,6 +1314,7 @@ function setupHtml(user?: AuthenticatedUser | null): string {
 
     function renderState(data) {
       const report = data.report || {};
+      applyRegistryStateOnce(data.registry);
       const ready = report.status === 'ready';
       readyBadge.textContent = ready ? 'Ready' : 'Not ready';
       readyBadge.className = ready ? 'status ready' : 'status not-ready';
@@ -1277,10 +1425,15 @@ function setupHtml(user?: AuthenticatedUser | null): string {
         capabilityVersion: formValue(registryForm, 'capabilityVersion'),
         authorName: formValue(registryForm, 'authorName'),
         authorContactEmail: formValue(registryForm, 'authorContactEmail'),
+        authorContactOther: formValue(registryForm, 'authorContactOther'),
         authorOrganization: formValue(registryForm, 'authorOrganization'),
         tags: formValue(registryForm, 'tags'),
         pricingAmount: formValue(registryForm, 'pricingAmount'),
-        pricingUnit: formValue(registryForm, 'pricingUnit')
+        pricingUnit: formValue(registryForm, 'pricingUnit'),
+        exampleOutputs: formValue(registryForm, 'exampleOutputs'),
+        legalPrivacyPolicy: formValue(registryForm, 'legalPrivacyPolicy'),
+        legalTerms: formValue(registryForm, 'legalTerms'),
+        legalOther: formValue(registryForm, 'legalOther')
       };
       try {
         const res = await fetch('/setup/registry/register', {
@@ -1675,7 +1828,8 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
         "Capability version",
       );
       const authorName = requireString(body.authorName, "Author name");
-      const registryPatch = registryEnvPatch(body);
+      const exampleOutputs = normalizeRegistryExampleOutputs(body.exampleOutputs);
+      const registryPatch = registryEnvPatch(body, exampleOutputs);
       await persistEnvPatch(registryPatch);
       applyEnvPatch(registryPatch);
 
@@ -1693,6 +1847,12 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
         authorContactOther: str(body.authorContactOther),
         authorOrganization: str(body.authorOrganization),
         tags,
+        exampleOutputs,
+        legal: {
+          privacyPolicy: str(body.legalPrivacyPolicy),
+          terms: str(body.legalTerms),
+          other: str(body.legalOther),
+        },
         pricing: [
           {
             amount: pricingAmount,

@@ -32,6 +32,22 @@ function resetEnv(): void {
   delete process.env.SETUP_PASSWORD;
   delete process.env.SETUP_ENV_PATH;
   delete process.env.DB_PATH;
+  delete process.env.REGISTRY_AGENT_NAME;
+  delete process.env.REGISTRY_AGENT_DESCRIPTION;
+  delete process.env.REGISTRY_AGENT_API_BASE_URL;
+  delete process.env.REGISTRY_CAPABILITY_NAME;
+  delete process.env.REGISTRY_CAPABILITY_VERSION;
+  delete process.env.REGISTRY_AUTHOR_NAME;
+  delete process.env.REGISTRY_AUTHOR_CONTACT_EMAIL;
+  delete process.env.REGISTRY_AUTHOR_CONTACT_OTHER;
+  delete process.env.REGISTRY_AUTHOR_ORGANIZATION;
+  delete process.env.REGISTRY_TAGS;
+  delete process.env.REGISTRY_PRICING_AMOUNT;
+  delete process.env.REGISTRY_PRICING_UNIT;
+  delete process.env.REGISTRY_EXAMPLE_OUTPUTS;
+  delete process.env.REGISTRY_LEGAL_PRIVACY_POLICY;
+  delete process.env.REGISTRY_LEGAL_TERMS;
+  delete process.env.REGISTRY_LEGAL_OTHER;
 }
 
 const ADMIN_USERNAME = "admin";
@@ -455,8 +471,27 @@ describe("setup UI", () => {
         network: "Preprod",
         sellingWalletVkey: "seller-vkey",
         name: "Langdock Agent",
+        description: "Agent for Langdock test jobs",
         apiBaseUrl: "https://agent.example.com",
+        Author: {
+          name: "Test Author",
+          contactEmail: "author@example.com",
+          contactOther: "https://example.com/contact",
+          organization: "Example Org",
+        },
         Capability: { name: "langdock-agent", version: "1.0.0" },
+        ExampleOutputs: [
+          {
+            name: "Sample answer",
+            url: "https://agent.example.com/sample.json",
+            mimeType: "application/json",
+          },
+        ],
+        Legal: {
+          privacyPolicy: "https://example.com/privacy",
+          terms: "https://example.com/terms",
+          other: "No extra terms.",
+        },
         AgentPricing: {
           pricingType: "Fixed",
           Pricing: [
@@ -501,10 +536,23 @@ describe("setup UI", () => {
         capabilityName: "langdock-agent",
         capabilityVersion: "1.0.0",
         authorName: "Test Author",
+        authorContactEmail: "author@example.com",
+        authorContactOther: "https://example.com/contact",
+        authorOrganization: "Example Org",
         tags: "langdock,masumi",
         pricingAmount: "1000000",
         pricingUnit:
           "16a55b2a349361ff88c03788f93e1e966e5d689605d044fef722ddde0014df10745553444d",
+        exampleOutputs: JSON.stringify([
+          {
+            name: "Sample answer",
+            url: "https://agent.example.com/sample.json",
+            mimeType: "application/json",
+          },
+        ]),
+        legalPrivacyPolicy: "https://example.com/privacy",
+        legalTerms: "https://example.com/terms",
+        legalOther: "No extra terms.",
       },
     });
 
@@ -515,7 +563,47 @@ describe("setup UI", () => {
     });
     const env = await readFile(process.env.SETUP_ENV_PATH!, "utf8");
     expect(env).toContain("REGISTRY_AGENT_NAME=\"Langdock Agent\"");
+    expect(env).toContain("REGISTRY_AUTHOR_CONTACT_OTHER=https://example.com/contact");
+    expect(env).toContain("REGISTRY_EXAMPLE_OUTPUTS=");
+    expect(env).toContain("REGISTRY_LEGAL_TERMS=https://example.com/terms");
     expect(env).toContain("AGENT_IDENTIFIER=asset_identifier_123");
+
+    await app.close();
+  });
+
+  it("rejects invalid registry example output JSON before calling Masumi", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
+    process.env.PAYMENT_API_KEY = "payment-admin-key";
+    process.env.SELLER_VKEY = "seller-vkey";
+
+    const app = await buildApp();
+    const cookie = await sessionCookie(app);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/setup/registry/register",
+      headers: { cookie },
+      payload: {
+        agentName: "Custom Agent",
+        agentDescription: "A custom listing.",
+        agentApiBaseUrl: "https://agent.example.com",
+        capabilityName: "custom-capability",
+        capabilityVersion: "1.0.0",
+        authorName: "Test Author",
+        tags: "custom,agent",
+        pricingAmount: "1000000",
+        exampleOutputs: "not-json",
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: "REGISTRY_REGISTRATION_FAILED",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
 
     await app.close();
   });

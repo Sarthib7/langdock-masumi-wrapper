@@ -75,7 +75,7 @@ cp .env.example .env
 | `PRICE_AMOUNTS` | Optional dynamic `RequestedFunds` JSON array. Leave empty for fixed pricing configured in Masumi SaaS/admin. |
 | `HITL_CHAT_MODE` | Set `true` to keep paid Langdock jobs open as a chat. After each answer `/status` returns `awaiting_input`; `/provide_input` continues until the user sends `DONE`. |
 | `INPUT_SCHEMA_PATH` / `INPUT_SCHEMA_JSON` | MIP-003 schema served at `/input_schema`. |
-| `REQUIRE_PRODUCTION_CONFIG` | Set `true` to make startup fail until production env is complete. Also enforced automatically when `NODE_ENV=production`. |
+| `REQUIRE_PRODUCTION_CONFIG` | Set `true` to make startup fail until production env is complete. Leave unset/false when the admin still needs to use the locked setup UI. |
 | `SETUP_USERNAME` / `SETUP_PASSWORD_HASH` | Required admin login for the hosted setup UI. Browser registration is disabled. |
 | `SETUP_PASSWORD` | Plaintext fallback for admin login when your deployment secret store is private. Prefer `SETUP_PASSWORD_HASH`. |
 | `SETUP_ACCESS_TOKEN` | Optional bearer/basic API access token for setup endpoints. Admin username/password remains the browser login. |
@@ -141,9 +141,10 @@ SETUP_PASSWORD="change-me"
 but the browser login does not allow public registration.
 
 The setup UI also includes **Agent slots** — up to four registration profiles saved
-in your browser's localStorage. Click a slot, fill in the registration fields, and
-use **Save current slot** to persist it locally. **Register agent** submits the
-selected slot to the Masumi registry and auto-saves the profile afterwards.
+in your browser's localStorage. The admin chooses the public agent name,
+description, URL, capability/version, author/contact details, tags, pricing,
+legal links, and optional example outputs. **Register agent** submits the selected
+slot to the Masumi registry and auto-saves the profile afterwards.
 
 #### Credential guide
 
