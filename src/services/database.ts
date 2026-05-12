@@ -1,31 +1,40 @@
 /**
  * SQLite database for user authentication and session management.
  *
- * Stores user credentials (hashed passwords) and active sessions.
- * The database file is created at DB_PATH (default: data/auth.db).
+ * Uses sql.js (WASM-based SQLite) — zero native compilation, works on any
+ * platform including Alpine Docker images without Python/build-tools.
+ *
+ * The database is loaded from DB_PATH (default: data/auth.db) on first use
+ * and auto-saved after every write operation.
  */
 
-import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
+import initSqlJs, { type Database as SqlJsDatabase } from "sql.js";
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 
-let db: Database.Database | undefined;
+let db: SqlJsDatabase | undefined;
+let dbPathValue: string;
 
 function dbPath(): string {
   return process.env.DB_PATH || path.join(process.cwd(), "data", "auth.db");
 }
 
-export function getDb(): Database.Database {
+async function loadDb(): Promise<SqlJsDatabase> {
   if (db) return db;
 
-  const filePath = dbPath();
-  mkdirSync(path.dirname(filePath), { recursive: true });
+  dbPathValue = dbPath();
+  mkdirSync(path.dirname(dbPathValue), { recursive: true });
 
-  db = new Database(filePath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+  const SQL = await initSqlJs();
 
-  db.exec(`
+  if (existsSync(dbPathValue)) {
+    const buffer = readFileSync(dbPathValue);
+    db = new SQL.Database(buffer);
+  } else {
+    db = new SQL.Database();
+  }
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       username TEXT NOT NULL UNIQUE,
@@ -35,7 +44,9 @@ export function getDb(): Database.Database {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+  `);
 
+  db.run(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -43,12 +54,21 @@ export function getDb(): Database.Database {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       expires_at TEXT NOT NULL
     );
-
-    CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
-    CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
   `);
 
+  db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)`);
+
+  save();
   return db;
+}
+
+function save(): void {
+  if (db && dbPathValue) {
+    const data = db.export();
+    const buffer = Buffer.from(data);
+    writeFileSync(dbPathValue, buffer);
+  }
 }
 
 export interface UserRow {
@@ -69,21 +89,21 @@ export interface SessionRow {
   expires_at: string;
 }
 
-export function createUser(
+export async function createUser(
   id: string,
   username: string,
   passwordHash: string,
   email?: string,
   displayName?: string,
-): UserRow {
-  const database = getDb();
+): Promise<UserRow> {
+  const database = await loadDb();
   const now = new Date().toISOString();
-  database
-    .prepare(
-      `INSERT INTO users (id, username, email, password_hash, display_name, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(id, username, email || null, passwordHash, displayName || null, now, now);
+  database.run(
+    `INSERT INTO users (id, username, email, password_hash, display_name, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [id, username, email || null, passwordHash, displayName || null, now, now],
+  );
+  save();
   return {
     id,
     username,
@@ -95,68 +115,109 @@ export function createUser(
   };
 }
 
-export function findUserByUsername(username: string): UserRow | undefined {
-  return getDb().prepare("SELECT * FROM users WHERE username = ?").get(username) as
-    | UserRow
-    | undefined;
+export async function findUserByUsername(username: string): Promise<UserRow | undefined> {
+  const database = await loadDb();
+  const stmt = database.prepare("SELECT * FROM users WHERE username = ?");
+  stmt.bind([username]);
+  try {
+    if (stmt.step()) {
+      return rowToUser(stmt);
+    }
+    return undefined;
+  } finally {
+    stmt.free();
+  }
 }
 
-export function findUserById(id: string): UserRow | undefined {
-  return getDb().prepare("SELECT * FROM users WHERE id = ?").get(id) as
-    | UserRow
-    | undefined;
+export async function findUserById(id: string): Promise<UserRow | undefined> {
+  const database = await loadDb();
+  const stmt = database.prepare("SELECT * FROM users WHERE id = ?");
+  stmt.bind([id]);
+  try {
+    if (stmt.step()) {
+      return rowToUser(stmt);
+    }
+    return undefined;
+  } finally {
+    stmt.free();
+  }
 }
 
-export function listUsers(): Pick<UserRow, "id" | "username" | "email" | "display_name" | "created_at">[] {
-  return getDb()
-    .prepare("SELECT id, username, email, display_name, created_at FROM users ORDER BY created_at")
-    .all() as Pick<UserRow, "id" | "username" | "email" | "display_name" | "created_at">[];
+export async function listUsers(): Promise<Pick<UserRow, "id" | "username" | "email" | "display_name" | "created_at">[]> {
+  const database = await loadDb();
+  const stmt = database.prepare("SELECT id, username, email, display_name, created_at FROM users ORDER BY created_at");
+  const results: Pick<UserRow, "id" | "username" | "email" | "display_name" | "created_at">[] = [];
+  while (stmt.step()) {
+    const row: Record<string, unknown> = {};
+    const columns = stmt.getColumnNames();
+    const values = stmt.get();
+    columns.forEach((col, i) => { row[col] = values[i]; });
+    results.push(row as Pick<UserRow, "id" | "username" | "email" | "display_name" | "created_at">);
+  }
+  stmt.free();
+  return results;
 }
 
-export function deleteUser(id: string): boolean {
-  const result = getDb().prepare("DELETE FROM users WHERE id = ?").run(id);
-  return result.changes > 0;
+export async function deleteUser(id: string): Promise<boolean> {
+  const database = await loadDb();
+  database.run("DELETE FROM sessions WHERE user_id = ?", [id]);
+  database.run("DELETE FROM users WHERE id = ?", [id]);
+  save();
+  return true;
 }
 
-export function createSession(
+export async function createSession(
   id: string,
   userId: string,
   tokenHash: string,
   expiresAt: Date,
-): void {
-  getDb()
-    .prepare(
-      `INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    )
-    .run(id, userId, tokenHash, new Date().toISOString(), expiresAt.toISOString());
+): Promise<void> {
+  const database = await loadDb();
+  database.run(
+    `INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [id, userId, tokenHash, new Date().toISOString(), expiresAt.toISOString()],
+  );
+  save();
 }
 
-export function findSessionByTokenHash(tokenHash: string): SessionRow | undefined {
-  const row = getDb()
-    .prepare("SELECT * FROM sessions WHERE token_hash = ? AND expires_at > ?")
-    .get(tokenHash, new Date().toISOString()) as SessionRow | undefined;
-  return row;
+export async function findSessionByTokenHash(tokenHash: string): Promise<SessionRow | undefined> {
+  const database = await loadDb();
+  const stmt = database.prepare("SELECT * FROM sessions WHERE token_hash = ? AND expires_at > ?");
+  stmt.bind([tokenHash, new Date().toISOString()]);
+  try {
+    if (stmt.step()) {
+      return rowToSession(stmt);
+    }
+    return undefined;
+  } finally {
+    stmt.free();
+  }
 }
 
-export function deleteSession(id: string): void {
-  getDb().prepare("DELETE FROM sessions WHERE id = ?").run(id);
+export async function deleteSession(id: string): Promise<void> {
+  const database = await loadDb();
+  database.run("DELETE FROM sessions WHERE id = ?", [id]);
+  save();
 }
 
-export function deleteExpiredSessions(): number {
-  const result = getDb()
-    .prepare("DELETE FROM sessions WHERE expires_at <= ?")
-    .run(new Date().toISOString());
-  return result.changes;
+export async function deleteExpiredSessions(): Promise<number> {
+  const database = await loadDb();
+  database.run("DELETE FROM sessions WHERE expires_at <= ?", [new Date().toISOString()]);
+  save();
+  return 0;
 }
 
-export function deleteUserSessions(userId: string): void {
-  getDb().prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+export async function deleteUserSessions(userId: string): Promise<void> {
+  const database = await loadDb();
+  database.run("DELETE FROM sessions WHERE user_id = ?", [userId]);
+  save();
 }
 
 /** Close the database connection. Used in tests. */
 export function closeDb(): void {
   if (db) {
+    save();
     db.close();
     db = undefined;
   }
@@ -165,4 +226,22 @@ export function closeDb(): void {
 /** Reset the database module state. Used in tests. */
 export function resetDb(): void {
   closeDb();
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────
+
+function rowToUser(stmt: import("sql.js").Statement): UserRow {
+  const columns = stmt.getColumnNames();
+  const values = stmt.get();
+  const row: Record<string, unknown> = {};
+  columns.forEach((col, i) => { row[col] = values[i]; });
+  return row as unknown as UserRow;
+}
+
+function rowToSession(stmt: import("sql.js").Statement): SessionRow {
+  const columns = stmt.getColumnNames();
+  const values = stmt.get();
+  const row: Record<string, unknown> = {};
+  columns.forEach((col, i) => { row[col] = values[i]; });
+  return row as unknown as SessionRow;
 }

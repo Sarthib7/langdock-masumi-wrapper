@@ -65,13 +65,13 @@ export async function registerUser(
     return { error: "Password must be at least 8 characters." };
   }
 
-  const existing = findUserByUsername(trimmed);
+  const existing = await findUserByUsername(trimmed);
   if (existing) {
     return { error: "Username already taken." };
   }
 
   const passwordHash = await hashPassword(password);
-  const user = createUserRow(randomUUID(), trimmed, passwordHash, email, displayName);
+  const user = await createUserRow(randomUUID(), trimmed, passwordHash, email, displayName);
 
   const { token } = await createSessionForUser(user);
 
@@ -91,7 +91,7 @@ export async function loginUser(
   password: string,
 ): Promise<{ user: AuthenticatedUser; token: string } | { error: string }> {
   const trimmed = username.trim().toLowerCase();
-  const user = findUserByUsername(trimmed);
+  const user = await findUserByUsername(trimmed);
   if (!user) {
     return { error: "Invalid username or password." };
   }
@@ -117,7 +117,7 @@ export async function loginUser(
 async function createSessionForUser(
   user: UserRow,
 ): Promise<{ token: string }> {
-  deleteExpiredSessions();
+  await deleteExpiredSessions();
 
   const token = generateSessionToken();
   const tokenHash = sha256(token);
@@ -125,18 +125,18 @@ async function createSessionForUser(
     Date.now() + SESSION_DURATION_HOURS * 60 * 60 * 1000,
   );
 
-  createSessionRow(randomUUID(), user.id, tokenHash, expiresAt);
+  await createSessionRow(randomUUID(), user.id, tokenHash, expiresAt);
 
   return { token };
 }
 
-export function verifyToken(token: string): AuthenticatedUser | null {
+export async function verifyToken(token: string): Promise<AuthenticatedUser | null> {
   if (!token) return null;
   const tokenHash = sha256(token);
-  const session = findSessionByTokenHash(tokenHash);
+  const session = await findSessionByTokenHash(tokenHash);
   if (!session) return null;
 
-  const user = findUserById(session.user_id);
+  const user = await findUserById(session.user_id);
   if (!user) return null;
 
   return {
@@ -147,15 +147,15 @@ export function verifyToken(token: string): AuthenticatedUser | null {
   };
 }
 
-export function logoutUser(token: string): void {
+export async function logoutUser(token: string): Promise<void> {
   if (!token) return;
   const tokenHash = sha256(token);
-  const session = findSessionByTokenHash(tokenHash);
+  const session = await findSessionByTokenHash(tokenHash);
   if (session) {
-    deleteSession(session.id);
+    await deleteSession(session.id);
   }
 }
 
-export function logoutAllSessions(userId: string): void {
-  deleteUserSessions(userId);
+export async function logoutAllSessions(userId: string): Promise<void> {
+  await deleteUserSessions(userId);
 }

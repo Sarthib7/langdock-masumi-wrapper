@@ -1306,15 +1306,15 @@ function sessionTokenFromRequest(request: FastifyRequest): string {
   return "";
 }
 
-function getSessionUser(request: FastifyRequest): AuthenticatedUser | null {
+async function getSessionUser(request: FastifyRequest): Promise<AuthenticatedUser | null> {
   const token = sessionTokenFromRequest(request);
   if (!token) return null;
   return verifyToken(token);
 }
 
-function requestHasSetupAccess(request: FastifyRequest): boolean {
+async function requestHasSetupAccess(request: FastifyRequest): Promise<boolean> {
   // Session-based auth
-  const user = getSessionUser(request);
+  const user = await getSessionUser(request);
   if (user) return true;
   // Legacy token/basic auth only when explicitly configured
   if (setupAccessConfigured()) {
@@ -1335,7 +1335,7 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
   // ── Auth routes ─────────────────────────────────────────────────────
 
   app.get("/", async (request, reply) => {
-    const user = getSessionUser(request);
+    const user = await getSessionUser(request);
     if (user) {
       return reply.redirect("/dashboard");
     }
@@ -1343,7 +1343,7 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
   });
 
   app.get("/dashboard", async (request, reply) => {
-    const user = getSessionUser(request);
+    const user = await getSessionUser(request);
     if (!user) {
       // Allow legacy token auth for API users but only when explicitly configured
       if (!setupAccessConfigured() || !requestCanConfigure(request)) {
@@ -1385,7 +1385,7 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
 
   app.post("/auth/logout", async (request, reply) => {
     const token = sessionTokenFromRequest(request);
-    if (token) logoutUser(token);
+    if (token) await logoutUser(token);
     return reply
       .header("set-cookie", "session=; path=/; max-age=0; SameSite=Strict")
       .send({ ok: true });
@@ -1398,7 +1398,7 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
   });
 
   app.post("/setup/config", async (request, reply) => {
-    if (!requestHasSetupAccess(request)) {
+    if (!await requestHasSetupAccess(request)) {
       return reply.status(401).send({
         error: "SETUP_ACCESS_DENIED",
         message: "Authentication required.",
@@ -1428,7 +1428,7 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
   });
 
   app.post("/setup/langdock/test", async (request, reply) => {
-    if (!requestHasSetupAccess(request)) {
+    if (!await requestHasSetupAccess(request)) {
       return reply.status(401).send({
         error: "SETUP_ACCESS_DENIED",
         message: "Authentication required.",
@@ -1484,7 +1484,7 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
   });
 
   app.post("/setup/registry/register", async (request, reply) => {
-    if (!requestHasSetupAccess(request)) {
+    if (!await requestHasSetupAccess(request)) {
       return reply.status(401).send({
         error: "SETUP_ACCESS_DENIED",
         message: "Authentication required.",
@@ -1589,7 +1589,7 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
   });
 
   app.get("/setup/registry/status", async (request, reply) => {
-    if (!requestHasSetupAccess(request)) {
+    if (!await requestHasSetupAccess(request)) {
       return reply.status(401).send({
         error: "SETUP_ACCESS_DENIED",
         message: "Authentication required.",
