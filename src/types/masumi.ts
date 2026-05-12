@@ -9,7 +9,8 @@ export type JobStatus =
   | "running"
   | "completed"
   | "failed"
-  | "refunded";
+  | "refunded"
+  | "awaiting_input";
 
 /** Single MIP-003 `input_data` entry: `key` is the schema field id, `value` is the user input. */
 export type InputDataItem = {
@@ -25,7 +26,10 @@ export type StartJobRequestBody = {
   inputData?: InputDataItem[] | Record<string, unknown>;
 };
 
-/** JSON body for a successful `POST /start_job`. `input_hash` uses snake_case per MIP-003 spec. */
+/**
+ * JSON body for a successful `POST /start_job`. `input_hash` uses snake_case per MIP-003 spec.
+ * Sokosumi expects payment deadline fields as Unix milliseconds.
+ */
 export type StartJobResponseBody = {
   id: string;
   job_id: string;
@@ -53,8 +57,11 @@ export type StatusResponseBody = {
   output?: unknown;
   input_hash?: string;
   output_hash?: string;
+  input_schema?: unknown;
   error?: string;
   message?: string;
+  /** Alias used by some MIP-003/HITL clients. */
+  Message?: string;
   created_at?: string;
   completed_at?: string;
   failed_at?: string;
@@ -88,6 +95,13 @@ export type JobRecord = {
   result?: unknown;
   output_hash?: string;
   error?: string;
+  awaiting_input_schema?: unknown;
+  awaiting_input_message?: string;
+  conversation?: Array<{
+    id: string;
+    role: "user" | "assistant" | "system";
+    parts: Array<{ type: string; [key: string]: unknown }>;
+  }>;
   payByTime: number;
   submitResultTime: number;
   unlockTime: number;

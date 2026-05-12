@@ -66,6 +66,13 @@ export function registerStatus(
       body.output = job.result;
     }
     if (job.output_hash) body.output_hash = job.output_hash;
+    if (job.status === "awaiting_input") {
+      body.input_schema = job.awaiting_input_schema;
+      if (job.awaiting_input_message) {
+        body.message = job.awaiting_input_message;
+        body.Message = job.awaiting_input_message;
+      }
+    }
     if (job.error) {
       body.error = job.error;
       body.message = job.error;

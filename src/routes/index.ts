@@ -6,6 +6,7 @@ import type { FastifyInstance } from "fastify";
 import type { BridgeContext } from "./bridgeContext.js";
 import { registerAvailability } from "./availability.js";
 import { registerInputSchema } from "./inputSchema.js";
+import { registerProvideInput } from "./provideInput.js";
 import { registerReadiness } from "./readiness.js";
 import { registerStartJob } from "./startJob.js";
 import { registerStatus } from "./status.js";
@@ -20,6 +21,7 @@ export function registerRoutes(
   registerAvailability(app, ctx);
   registerStatus(app, ctx);
   registerStartJob(app, ctx);
+  registerProvideInput(app);
   registerInputSchema(app);
   registerReadiness(app);
 }

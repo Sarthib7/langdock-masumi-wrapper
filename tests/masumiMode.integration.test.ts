@@ -40,6 +40,7 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
     process.env.NETWORK = "Preprod";
     process.env.PAYMENT_POLL_INTERVAL_MS = "10";
     process.env.PAYMENT_POLL_TIMEOUT_MS = "2000";
+    process.env.HITL_CHAT_MODE = "false";
   });
 
   afterEach(() => {
@@ -53,6 +54,7 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
     delete process.env.NETWORK;
     delete process.env.PAYMENT_POLL_INTERVAL_MS;
     delete process.env.PAYMENT_POLL_TIMEOUT_MS;
+    delete process.env.HITL_CHAT_MODE;
   });
 
   it("registers sale, polls, runs handler, submits hash", async () => {

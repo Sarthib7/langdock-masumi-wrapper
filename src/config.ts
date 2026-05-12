@@ -52,6 +52,9 @@ export type AppConfig = {
   externalDisputeUnlockOffsetSec: number;
 
   inputSchema: InputSchemaField[];
+
+  /** When true, Langdock jobs stay open for repeated /provide_input turns until user sends DONE. */
+  hitlChatMode: boolean;
 };
 
 function numEnv(name: string, fallback: number): number {
@@ -64,6 +67,12 @@ function numEnv(name: string, fallback: number): number {
 function strEnv(name: string, fallback = ""): string {
   const v = process.env[name];
   return v === undefined ? fallback : v;
+}
+
+function boolEnv(name: string, fallback = false): boolean {
+  const v = process.env[name];
+  if (v === undefined || v === "") return fallback;
+  return ["1", "true", "yes", "on"].includes(v.trim().toLowerCase());
 }
 
 function parseNetwork(raw: string | undefined): MasumiNetwork {
@@ -224,5 +233,6 @@ export function loadConfig(): AppConfig {
     ),
 
     inputSchema: loadInputSchema(),
+    hitlChatMode: boolEnv("HITL_CHAT_MODE") || boolEnv("LANGDOCK_HITL_CHAT_MODE"),
   };
 }

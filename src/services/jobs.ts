@@ -54,6 +54,9 @@ export function updateJob(
       | "result"
       | "output_hash"
       | "error"
+      | "awaiting_input_schema"
+      | "awaiting_input_message"
+      | "conversation"
       | "completedAt"
       | "failedAt"
     >
@@ -77,7 +80,14 @@ export function setJobStatus(
   extras?: Partial<
     Pick<
       JobRecord,
-      "result" | "output_hash" | "error" | "completedAt" | "failedAt"
+      | "result"
+      | "output_hash"
+      | "error"
+      | "awaiting_input_schema"
+      | "awaiting_input_message"
+      | "conversation"
+      | "completedAt"
+      | "failedAt"
     >
   >,
 ): JobRecord | undefined {

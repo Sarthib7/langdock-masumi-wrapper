@@ -13,6 +13,7 @@ import type { StartJobHandler } from "../agentEndpointHandler.js";
 import type { InputDataItem } from "../types/masumi.js";
 import { setJobStatus } from "./jobs.js";
 import { computeOutputHash, stringifyForHash } from "./hashing.js";
+import { startHitlChatJob } from "./hitlChat.js";
 import { LangdockApiError } from "./langdock.js";
 import {
   MasumiPaymentClient,
@@ -126,6 +127,15 @@ export function runWithPayment(
       setJobStatus(ctx.jobId, "failed", {
         error: `Timed out waiting for payment (last state: ${finalState ?? "unknown"})`,
         failedAt: Date.now(),
+      });
+      return;
+    }
+
+    if (ctx.config.hitlChatMode) {
+      await startHitlChatJob({
+        jobId: ctx.jobId,
+        inputData: ctx.inputData,
+        config: ctx.config,
       });
       return;
     }
