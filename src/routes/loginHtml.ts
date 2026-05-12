@@ -1,23 +1,22 @@
 /**
- * Login / Register page HTML.
+ * Login page HTML.
  *
  * Served at `/` when no active session cookie is present.
- * After successful login/register, the browser is redirected to `/dashboard`.
+ * After successful login, the browser is redirected to `/dashboard`.
  */
 
-export function loginHtml(error?: string, mode?: string): string {
-  const effectiveMode = mode || "login";
+export function loginHtml(error?: string): string {
+  const effectiveMode = "login";
   const errorHtml = error
     ? `<div class="error-banner" role="alert">${escHtml(error)}</div>`
     : "";
-  const isRegister = effectiveMode === "register";
 
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${isRegister ? "Create account" : "Sign in"} — Langdock Masumi</title>
+  <title>Sign in — Langdock Masumi</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -284,30 +283,8 @@ export function loginHtml(error?: string, mode?: string): string {
       <div class="logo-icon" aria-hidden="true">LM</div>
       <span class="logo-text">Langdock Masumi</span>
     </div>
-    <p class="subtitle">${
-      isRegister
-        ? "Create an operator account to manage your agents."
-        : "Sign in to manage your Langdock Masumi agents."
-    }</p>
+    <p class="subtitle">Sign in with the admin credentials configured on this server.</p>
     ${errorHtml}
-    <div class="tabs" role="tablist">
-      <button
-        type="button"
-        class="tab"
-        role="tab"
-        id="tab-login"
-        aria-selected="${!isRegister}"
-        aria-controls="panel-login"
-      >Sign in</button>
-      <button
-        type="button"
-        class="tab"
-        role="tab"
-        id="tab-register"
-        aria-selected="${isRegister}"
-        aria-controls="panel-register"
-      >Create account</button>
-    </div>
     <form id="authForm" novalidate>
       <input type="hidden" name="mode" value="${effectiveMode}" />
       <div class="field" id="usernameGroup">
@@ -321,21 +298,9 @@ export function loginHtml(error?: string, mode?: string): string {
           required
           minlength="3"
           maxlength="32"
-          placeholder="sarthi"
-          ${isRegister ? "" : 'value=""'}
+          placeholder="admin"
+          value=""
         />
-      </div>
-      <div class="field" id="emailGroup">
-        <label for="email">Email</label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          autocomplete="email"
-          spellcheck="false"
-          placeholder="you@example.com"
-        />
-        <span class="hint">Optional. Used for account recovery.</span>
       </div>
       <div class="field">
         <label for="password">Password <span class="required">*</span></label>
@@ -344,87 +309,39 @@ export function loginHtml(error?: string, mode?: string): string {
             id="password"
             name="password"
             type="password"
-            autocomplete="${isRegister ? "new-password" : "current-password"}"
+            autocomplete="current-password"
             required
             minlength="8"
             spellcheck="false"
-            placeholder="Min 8 characters"
           />
           <button type="button" class="toggle-pw" id="togglePw" aria-label="Show password">Show</button>
         </div>
       </div>
-      <div class="field" id="displayNameGroup">
-        <label for="displayName">Display name</label>
-        <input
-          id="displayName"
-          name="displayName"
-          type="text"
-          autocomplete="name"
-          spellcheck="false"
-          placeholder="Sarthi Borkar"
-        />
-      </div>
       <div id="formError" class="error-banner" role="alert" style="display:none"></div>
-      <button class="submit" type="submit" id="submitBtn">${
-        isRegister ? "Create account" : "Sign in"
-      }</button>
+      <button class="submit" type="submit" id="submitBtn">Sign in</button>
     </form>
     <p class="footer">
-      Credentials are stored locally in SQLite on this server.
+      Admin credentials are configured on the server. Sessions are stored locally.
     </p>
   </main>
 
   <script>
     (function() {
-      var tabs = document.querySelectorAll('.tab');
       var form = document.getElementById('authForm');
       var modeInput = form.elements.mode;
       var submitBtn = document.getElementById('submitBtn');
       var formError = document.getElementById('formError');
-      var usernameGroup = document.getElementById('usernameGroup');
-      var emailGroup = document.getElementById('emailGroup');
-      var displayNameGroup = document.getElementById('displayNameGroup');
-
-      var isRegister = ${isRegister ? "true" : "false"};
-      syncFields();
-
-      tabs.forEach(function(tab) {
-        tab.addEventListener('click', function() {
-          var target = tab.id === 'tab-register';
-          if (target === isRegister) return;
-          isRegister = target;
-          modeInput.value = isRegister ? 'register' : 'login';
-          document.getElementById('tab-login').setAttribute('aria-selected', String(!isRegister));
-          document.getElementById('tab-register').setAttribute('aria-selected', String(isRegister));
-          submitBtn.textContent = isRegister ? 'Create account' : 'Sign in';
-          syncFields();
-        });
-      });
-
-      function syncFields() {
-        emailGroup.style.display = isRegister ? '' : 'none';
-        displayNameGroup.style.display = isRegister ? '' : 'none';
-        var pw = document.getElementById('password');
-        pw.setAttribute('autocomplete', isRegister ? 'new-password' : 'current-password');
-        pw.setAttribute('placeholder', isRegister ? 'Min 8 characters' : '');
-        if (!isRegister) {
-          form.elements.email.value = '';
-          form.elements.displayName.value = '';
-        }
-      }
 
       form.addEventListener('submit', function(event) {
         event.preventDefault();
         formError.style.display = 'none';
         submitBtn.disabled = true;
-        submitBtn.textContent = isRegister ? 'Creating account...' : 'Signing in...';
+        submitBtn.textContent = 'Signing in...';
 
         var payload = {
           mode: modeInput.value,
           username: form.elements.username.value.trim(),
-          password: form.elements.password.value,
-          email: form.elements.email ? form.elements.email.value.trim() : '',
-          displayName: form.elements.displayName ? form.elements.displayName.value.trim() : ''
+          password: form.elements.password.value
         };
 
         fetch('/auth', {
@@ -436,16 +353,13 @@ export function loginHtml(error?: string, mode?: string): string {
             if (!res.ok) {
               throw new Error(data.message || 'Authentication failed.');
             }
-            if (data.token) {
-              document.cookie = 'session=' + encodeURIComponent(data.token) + '; path=/; max-age=86400; SameSite=Strict' + (location.protocol === 'https:' ? '; Secure' : '');
-            }
             window.location.href = '/dashboard';
           });
         }).catch(function(err) {
           formError.textContent = err instanceof Error ? err.message : 'Something went wrong.';
           formError.style.display = '';
           submitBtn.disabled = false;
-          submitBtn.textContent = isRegister ? 'Create account' : 'Sign in';
+          submitBtn.textContent = 'Sign in';
         });
       });
 

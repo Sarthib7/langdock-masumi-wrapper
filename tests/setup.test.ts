@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import { __resetJobsForTests } from "../src/services/jobs.js";
 import { resetDb } from "../src/services/database.js";
+import { __resetRateLimitsForTests } from "../src/services/rateLimit.js";
 
 const ORIGINAL_ENV = { ...process.env };
 let tempDir: string | undefined;
@@ -33,29 +34,35 @@ function resetEnv(): void {
   delete process.env.DB_PATH;
 }
 
-/** Register a user and return the session token. */
-async function registerAndGetToken(
+const ADMIN_USERNAME = "admin";
+const ADMIN_PASSWORD = "admin-password-123";
+
+/** Log in with configured admin credentials and return the session cookie. */
+async function loginAndGetCookie(
   app: Awaited<ReturnType<typeof buildApp>>,
-  username = "testuser",
-  password = "test-password-123",
+  username = ADMIN_USERNAME,
+  password = ADMIN_PASSWORD,
 ): Promise<string> {
   const res = await app.inject({
     method: "POST",
     url: "/auth",
-    payload: { mode: "register", username, password },
+    payload: { mode: "login", username, password },
   });
   expect(res.statusCode).toBe(200);
-  return res.json().token;
+  const setCookie = res.headers["set-cookie"];
+  expect(setCookie).toBeTruthy();
+  const match = String(setCookie).match(/session=([^;]+)/);
+  expect(match).toBeTruthy();
+  return `session=${match![1]}`;
 }
 
-/** Build a cookie header with a valid session token. */
+/** Build a cookie header with a valid session. */
 async function sessionCookie(
   app: Awaited<ReturnType<typeof buildApp>>,
   username?: string,
   password?: string,
 ): Promise<string> {
-  const token = await registerAndGetToken(app, username, password);
-  return `session=${encodeURIComponent(token)}`;
+  return loginAndGetCookie(app, username, password);
 }
 
 describe("setup UI", () => {
@@ -66,7 +73,10 @@ describe("setup UI", () => {
     tempDir = await mkdtemp(path.join(tmpdir(), "langdock-setup-test-"));
     process.env.SETUP_ENV_PATH = path.join(tempDir, ".env");
     process.env.DB_PATH = path.join(tempDir, "test.db");
+    process.env.SETUP_USERNAME = ADMIN_USERNAME;
+    process.env.SETUP_PASSWORD = ADMIN_PASSWORD;
     __resetJobsForTests();
+    __resetRateLimitsForTests();
   });
 
   afterEach(async () => {
@@ -85,7 +95,7 @@ describe("setup UI", () => {
     expect(loginRes.statusCode).toBe(200);
     expect(loginRes.headers["content-type"]).toContain("text/html");
     expect(loginRes.body).toContain("Sign in");
-    expect(loginRes.body).toContain("Create account");
+    expect(loginRes.body).not.toContain("Create account");
 
     const cookie = await sessionCookie(app);
     const dashRes = await app.inject({
@@ -113,12 +123,12 @@ describe("setup UI", () => {
     expect(res.body).toContain("Langdock Masumi Setup");
     expect(res.body).toContain("Credential guide");
     expect(res.body).toContain("Agent slots");
-    expect(res.body).toContain("openssl rand -hex 32");
+    expect(res.body).toContain("SETUP_PASSWORD_HASH");
     expect(res.body).toContain(
       "https://docs.langdock.com/api-endpoints/agent/agent-api-guide",
     );
     // User badge should show
-    expect(res.body).toContain("testuser");
+    expect(res.body).toContain(ADMIN_USERNAME);
     expect(res.body).toContain("Sign out");
 
     await app.close();
@@ -134,73 +144,68 @@ describe("setup UI", () => {
     await app.close();
   });
 
-  it("registers a new user and returns a session token", async () => {
+  it("logs in with configured admin credentials and returns a session cookie", async () => {
     const app = await buildApp();
 
     const res = await app.inject({
       method: "POST",
       url: "/auth",
       payload: {
-        mode: "register",
-        username: "newuser",
-        password: "secure-pass-123",
-        email: "new@example.com",
-        displayName: "New User",
+        mode: "login",
+        username: ADMIN_USERNAME,
+        password: ADMIN_PASSWORD,
       },
     });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.ok).toBe(true);
-    expect(body.token).toBeTruthy();
-    expect(body.user.username).toBe("newuser");
-    expect(body.user.displayName).toBe("New User");
+    expect(body.user.username).toBe(ADMIN_USERNAME);
+    // Token is set via Set-Cookie header, not in body
+    expect(res.headers["set-cookie"]).toContain("session=");
+    expect(res.headers["set-cookie"]).toContain("HttpOnly");
 
     await app.close();
   });
 
-  it("rejects duplicate username on registration", async () => {
+  it("rejects browser registration", async () => {
     const app = await buildApp();
-
-    await registerAndGetToken(app, "dupuser");
 
     const res = await app.inject({
       method: "POST",
       url: "/auth",
-      payload: { mode: "register", username: "dupuser", password: "other-pass-123" },
+      payload: { mode: "register", username: "newuser", password: "other-pass-123" },
     });
-    expect(res.statusCode).toBe(409);
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: "REGISTRATION_DISABLED" });
 
     await app.close();
   });
 
-  it("logs in an existing user and returns a session token", async () => {
+  it("rejects login when admin credentials are not configured", async () => {
     const app = await buildApp();
-    await registerAndGetToken(app, "loginuser", "my-password-123");
+    delete process.env.SETUP_USERNAME;
+    delete process.env.SETUP_PASSWORD;
 
     const res = await app.inject({
       method: "POST",
       url: "/auth",
-      payload: { mode: "login", username: "loginuser", password: "my-password-123" },
+      payload: { mode: "login", username: ADMIN_USERNAME, password: ADMIN_PASSWORD },
     });
 
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body.ok).toBe(true);
-    expect(body.token).toBeTruthy();
-    expect(body.user.username).toBe("loginuser");
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toMatchObject({ error: "LOGIN_FAILED" });
 
     await app.close();
   });
 
   it("rejects wrong password on login", async () => {
     const app = await buildApp();
-    await registerAndGetToken(app, "wrongpwuser", "correct-password");
 
     const res = await app.inject({
       method: "POST",
       url: "/auth",
-      payload: { mode: "login", username: "wrongpwuser", password: "wrong-password" },
+      payload: { mode: "login", username: ADMIN_USERNAME, password: "wrong-password" },
     });
 
     expect(res.statusCode).toBe(401);

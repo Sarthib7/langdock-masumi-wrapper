@@ -2,12 +2,13 @@
  * Minimal operator UI for runtime Langdock + Masumi configuration.
  *
  * Credentials submitted here are saved to .env and applied to the running
- * process. Use SETUP_ACCESS_TOKEN when exposing this app beyond localhost.
+ * process. Configure SETUP_USERNAME plus SETUP_PASSWORD_HASH or SETUP_PASSWORD
+ * before exposing this app beyond localhost.
  */
 
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   MasumiNetwork,
@@ -28,7 +29,16 @@ import {
   type RegistryAgent,
 } from "../services/masumiPayment.js";
 import { getReadinessReport } from "../services/readiness.js";
-import { registerUser, loginUser, logoutUser, verifyToken, type AuthenticatedUser } from "../services/auth.js";
+import {
+  adminCredentialsConfigured,
+  loginAdmin,
+  logoutUser,
+  verifyAdminCredentials,
+  verifyToken,
+  type AuthenticatedUser,
+} from "../services/auth.js";
+import { constantTimeEqual } from "../services/opaqueTokens.js";
+import { checkRateLimit } from "../services/rateLimit.js";
 import { loginHtml } from "./loginHtml.js";
 import { MAINNET_USDCX_UNIT, PREPROD_TUSDM_UNIT } from "../services/sokosumiTokens.js";
 
@@ -212,7 +222,11 @@ async function persistEnvPatch(patch: EnvPatch): Promise<void> {
   }
 
   await mkdir(path.dirname(envPath), { recursive: true });
-  await writeFile(envPath, `${output.join("\n")}\n`, "utf8");
+  await writeFile(envPath, `${output.join("\n")}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  await chmod(envPath, 0o600);
 }
 
 function applyEnvPatch(patch: EnvPatch): void {
@@ -261,27 +275,77 @@ function basicCredentialsFromRequest(request: FastifyRequest): {
 function setupAccessConfigured(): boolean {
   return Boolean(
     process.env.SETUP_ACCESS_TOKEN?.trim() ||
-      (process.env.SETUP_USERNAME?.trim() && process.env.SETUP_PASSWORD?.trim()),
+      adminCredentialsConfigured(),
   );
 }
 
-function requestCanConfigure(request: FastifyRequest): boolean {
+async function requestCanConfigure(request: FastifyRequest): Promise<boolean> {
   const expectedToken = process.env.SETUP_ACCESS_TOKEN?.trim();
-  if (expectedToken && tokenFromRequest(request) === expectedToken) return true;
-
-  const expectedUsername = process.env.SETUP_USERNAME?.trim();
-  const expectedPassword = process.env.SETUP_PASSWORD?.trim();
-  if (expectedUsername && expectedPassword) {
-    const credentials = basicCredentialsFromRequest(request);
-    if (
-      credentials?.username === expectedUsername &&
-      credentials.password === expectedPassword
-    ) {
-      return true;
-    }
+  if (expectedToken && constantTimeEqual(tokenFromRequest(request), expectedToken)) {
+    return true;
   }
 
-  return !expectedToken && !(expectedUsername && expectedPassword);
+  const credentials = basicCredentialsFromRequest(request);
+  if (credentials && await verifyAdminCredentials(credentials.username, credentials.password)) {
+    return true;
+  }
+
+  return false;
+}
+
+function clientIdentifier(request: FastifyRequest, suffix = ""): string {
+  return suffix ? `${request.ip}:${suffix}` : request.ip;
+}
+
+function applyRateLimit(
+  reply: import("fastify").FastifyReply,
+  scope: string,
+  identifier: string,
+  limit: number,
+  windowMs: number,
+): boolean {
+  const result = checkRateLimit({ scope, identifier, limit, windowMs });
+  reply.header("x-ratelimit-limit", String(result.limit));
+  reply.header("x-ratelimit-remaining", String(result.remaining));
+  reply.header("x-ratelimit-reset", String(Math.ceil(result.resetAt / 1000)));
+
+  if (result.allowed) return true;
+
+  reply.header("retry-after", String(result.retryAfterSeconds));
+  void reply.status(429).send({
+    error: "RATE_LIMITED",
+    message: "Too many requests. Try again later.",
+  });
+  return false;
+}
+
+function requestOriginAllowed(request: FastifyRequest): boolean {
+  const secFetchSite = request.headers["sec-fetch-site"];
+  if (secFetchSite === "cross-site") return false;
+
+  const origin = request.headers.origin;
+  if (!origin) return true;
+
+  const host = request.headers.host;
+  if (!host) return false;
+
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
+
+function rejectCrossOriginPost(
+  request: FastifyRequest,
+  reply: import("fastify").FastifyReply,
+): boolean {
+  if (requestOriginAllowed(request)) return false;
+  void reply.status(403).send({
+    error: "INVALID_ORIGIN",
+    message: "Cross-origin state-changing requests are not allowed.",
+  });
+  return true;
 }
 
 function redactConfigState(): Record<string, unknown> {
@@ -293,7 +357,7 @@ function redactConfigState(): Record<string, unknown> {
     setupAccessRequired: setupAccessConfigured(),
     accessMethods: {
       hash: Boolean(process.env.SETUP_ACCESS_TOKEN?.trim()),
-      password: Boolean(process.env.SETUP_USERNAME?.trim() && process.env.SETUP_PASSWORD?.trim()),
+      password: adminCredentialsConfigured(),
     },
     configured: {
       langdockBaseUrl: config.langdockBaseUrl,
@@ -746,13 +810,13 @@ function setupHtml(user?: AuthenticatedUser | null): string {
     <div class="grid">
       <section aria-labelledby="configTitle">
         <h2 id="configTitle">Runtime config</h2>
-        <p class="banner">Credentials are saved to <code>.env</code>, applied to this process, and never shown again. Set <code>SETUP_ACCESS_TOKEN</code> before exposing this page publicly.</p>
+        <p class="banner">Credentials are saved to <code>.env</code>, applied to this process, and never shown again. Configure <code>SETUP_USERNAME</code> plus <code>SETUP_PASSWORD_HASH</code> before exposing this page publicly.</p>
         <div class="help" aria-labelledby="credentialGuideTitle">
           <h3 id="credentialGuideTitle">Credential guide</h3>
           <dl>
             <div>
-              <dt>Setup access token</dt>
-              <dd>Protects this setup page. Generate any long random secret, for example <code>openssl rand -hex 32</code>, then add it to Railway as <code>SETUP_ACCESS_TOKEN</code>. <a href="https://docs.railway.com/variables" target="_blank" rel="noreferrer">Railway variables</a></dd>
+              <dt>Admin login</dt>
+              <dd>Protects this setup page. Set <code>SETUP_USERNAME</code> and preferably a bcrypt <code>SETUP_PASSWORD_HASH</code>; <code>SETUP_PASSWORD</code> is accepted when your deployment secret store is private. <a href="https://docs.railway.com/variables" target="_blank" rel="noreferrer">Railway variables</a></dd>
             </div>
             <div>
               <dt>Langdock API key and Agent ID</dt>
@@ -1306,6 +1370,14 @@ function sessionTokenFromRequest(request: FastifyRequest): string {
   return "";
 }
 
+function setSessionCookie(reply: import("fastify").FastifyReply, token: string): void {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  reply.header(
+    "set-cookie",
+    `session=${encodeURIComponent(token)}; Path=/; Max-Age=86400; SameSite=Strict; HttpOnly${secure}`,
+  );
+}
+
 async function getSessionUser(request: FastifyRequest): Promise<AuthenticatedUser | null> {
   const token = sessionTokenFromRequest(request);
   if (!token) return null;
@@ -1346,7 +1418,7 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
     const user = await getSessionUser(request);
     if (!user) {
       // Allow legacy token auth for API users but only when explicitly configured
-      if (!setupAccessConfigured() || !requestCanConfigure(request)) {
+      if (!setupAccessConfigured() || !(await requestCanConfigure(request))) {
         return reply.redirect("/");
       }
     }
@@ -1354,36 +1426,52 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
   });
 
   app.post("/auth", async (request, reply) => {
+    if (rejectCrossOriginPost(request, reply)) return;
+
     const body =
       request.body && typeof request.body === "object" && !Array.isArray(request.body)
-        ? (request.body as Record<string, string>)
+        ? (request.body as Record<string, string | undefined>)
         : {};
     const mode = (body.mode || "login").trim().toLowerCase();
     const username = (body.username || "").trim();
     const password = body.password || "";
-    const email = (body.email || "").trim();
-    const displayName = (body.displayName || "").trim();
+
+    if (
+      !applyRateLimit(
+        reply,
+        "setup-auth",
+        clientIdentifier(request, username.toLowerCase() || "missing"),
+        5,
+        15 * 60 * 1000,
+      )
+    ) {
+      return;
+    }
 
     if (!username || !password) {
       return reply.status(400).send({ error: "MISSING_FIELDS", message: "Username and password are required." });
     }
 
     if (mode === "register") {
-      const result = await registerUser(username, password, email || undefined, displayName || undefined);
-      if ("error" in result) {
-        return reply.status(409).send({ error: "REGISTRATION_FAILED", message: result.error });
-      }
-      return reply.status(200).send({ ok: true, user: result.user, token: result.token });
+      return reply.status(403).send({
+        error: "REGISTRATION_DISABLED",
+        message: "Registration is disabled. Configure the admin login on the server.",
+      });
     }
 
-    const result = await loginUser(username, password);
-    if ("error" in result) {
-      return reply.status(401).send({ error: "LOGIN_FAILED", message: result.error });
+    const loginResult = await loginAdmin(username, password);
+    if ("error" in loginResult) {
+      return reply.status(adminCredentialsConfigured() ? 401 : 503).send({
+        error: "LOGIN_FAILED",
+        message: loginResult.error,
+      });
     }
-    return reply.status(200).send({ ok: true, user: result.user, token: result.token });
+    setSessionCookie(reply, loginResult.token);
+    return reply.status(200).send({ ok: true, user: loginResult.user });
   });
 
   app.post("/auth/logout", async (request, reply) => {
+    if (rejectCrossOriginPost(request, reply)) return;
     const token = sessionTokenFromRequest(request);
     if (token) await logoutUser(token);
     return reply
@@ -1393,16 +1481,45 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
 
   // ── Setup API routes ───────────────────────────────────────────────
 
-  app.get("/setup/config", async (_request, reply) => {
-    return reply.status(200).send(redactConfigState());
-  });
-
-  app.post("/setup/config", async (request, reply) => {
+  app.get("/setup/config", async (request, reply) => {
     if (!await requestHasSetupAccess(request)) {
       return reply.status(401).send({
         error: "SETUP_ACCESS_DENIED",
         message: "Authentication required.",
       });
+    }
+    if (
+      !applyRateLimit(
+        reply,
+        "setup-read",
+        clientIdentifier(request),
+        120,
+        60 * 1000,
+      )
+    ) {
+      return;
+    }
+    return reply.status(200).send(redactConfigState());
+  });
+
+  app.post("/setup/config", async (request, reply) => {
+    if (rejectCrossOriginPost(request, reply)) return;
+    if (!await requestHasSetupAccess(request)) {
+      return reply.status(401).send({
+        error: "SETUP_ACCESS_DENIED",
+        message: "Authentication required.",
+      });
+    }
+    if (
+      !applyRateLimit(
+        reply,
+        "setup-write",
+        clientIdentifier(request),
+        30,
+        60 * 1000,
+      )
+    ) {
+      return;
     }
 
     const body =
@@ -1428,11 +1545,23 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
   });
 
   app.post("/setup/langdock/test", async (request, reply) => {
+    if (rejectCrossOriginPost(request, reply)) return;
     if (!await requestHasSetupAccess(request)) {
       return reply.status(401).send({
         error: "SETUP_ACCESS_DENIED",
         message: "Authentication required.",
       });
+    }
+    if (
+      !applyRateLimit(
+        reply,
+        "setup-langdock-test",
+        clientIdentifier(request),
+        20,
+        60 * 1000,
+      )
+    ) {
+      return;
     }
 
     const config = loadConfig();
@@ -1484,11 +1613,23 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
   });
 
   app.post("/setup/registry/register", async (request, reply) => {
+    if (rejectCrossOriginPost(request, reply)) return;
     if (!await requestHasSetupAccess(request)) {
       return reply.status(401).send({
         error: "SETUP_ACCESS_DENIED",
         message: "Authentication required.",
       });
+    }
+    if (
+      !applyRateLimit(
+        reply,
+        "setup-registry-register",
+        clientIdentifier(request),
+        10,
+        60 * 1000,
+      )
+    ) {
+      return;
     }
 
     const body =
@@ -1594,6 +1735,17 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
         error: "SETUP_ACCESS_DENIED",
         message: "Authentication required.",
       });
+    }
+    if (
+      !applyRateLimit(
+        reply,
+        "setup-registry-status",
+        clientIdentifier(request),
+        30,
+        60 * 1000,
+      )
+    ) {
+      return;
     }
 
     try {
