@@ -14,7 +14,8 @@ It implements:
   `AGENT_IDENTIFIER` once the registration returns one.
 - `POST /start_job`   — registers a sale on the Masumi Payment Service, returns
   `blockchainIdentifier` + payment timings, defers execution until funds are locked.
-- `GET  /status`      — MIP-003 payload with `input_hash`, `output_hash`, result, timestamps.
+- `GET  /status`      — MIP-003 payload with `input_hash`, `output_hash`, result, timestamps, and HITL prompts when awaiting input.
+- `POST /provide_input` — optional HITL chat continuation for Langdock agents; send follow-up input or `DONE` to finish.
 - `GET  /availability` — health for load balancers / marketplace checks.
 - `GET  /input_schema` — schema shown to buyers on Sokosumi.
 - `GET  /ready` — operator readiness report for missing production secrets/config.
@@ -72,6 +73,7 @@ cp .env.example .env
 | `PAYMENT_API_AUTH_HEADER` | Optional override: `x-api-key` for SaaS, `token` for direct node. Auto-detected from the URL. |
 | `NETWORK` | `Preprod` or `Mainnet`. |
 | `PRICE_AMOUNTS` | Optional dynamic `RequestedFunds` JSON array. Leave empty for fixed pricing configured in Masumi SaaS/admin. |
+| `HITL_CHAT_MODE` | Set `true` to keep paid Langdock jobs open as a chat. After each answer `/status` returns `awaiting_input`; `/provide_input` continues until the user sends `DONE`. |
 | `INPUT_SCHEMA_PATH` / `INPUT_SCHEMA_JSON` | MIP-003 schema served at `/input_schema`. |
 | `REQUIRE_PRODUCTION_CONFIG` | Set `true` to make startup fail until production env is complete. Also enforced automatically when `NODE_ENV=production` or `PAYMENT_MODE=masumi`. |
 | `SETUP_ACCESS_TOKEN` | Optional shared token required by `POST /setup/config`. Set this before exposing the setup page beyond localhost. |
@@ -85,6 +87,7 @@ Full list in [.env.example](.env.example).
 |---------|------|
 | Env loading and auth-header selection | [src/config.ts](src/config.ts) |
 | MIP-003 routes | [src/routes/index.ts](src/routes/index.ts) |
+| HITL chat continuation | [src/routes/provideInput.ts](src/routes/provideInput.ts), [src/services/hitlChat.ts](src/services/hitlChat.ts) |
 | Payment API client | [src/services/masumiPayment.ts](src/services/masumiPayment.ts) |
 | Payment-gated job runner | [src/services/jobRunner.ts](src/services/jobRunner.ts) |
 | Production readiness checks | [src/services/readiness.ts](src/services/readiness.ts) |
@@ -183,6 +186,18 @@ curl -s -X POST http://localhost:3000/start_job \
   -d '{"identifier_from_purchaser":"abc123def4567890","input_data":[{"key":"text","value":"Hello"}]}'
 
 curl -s "http://localhost:3000/status?job_id=JOB_UUID"
+
+# HITL chat mode only: continue a job that reports status=awaiting_input.
+curl -s -X POST http://localhost:3000/provide_input \
+  -H "Content-Type: application/json" \
+  -d '{"job_id":"JOB_UUID","input_data":{"message":"Follow-up question"}}'
+
+# Finish the HITL chat and submit the final transcript hash. The HITL schema also
+# exposes a boolean `finish` control; default/off means continue.
+curl -s -X POST http://localhost:3000/provide_input \
+  -H "Content-Type: application/json" \
+  -d '{"job_id":"JOB_UUID","input_data":{"message":"","finish":true}}'
+
 curl -s http://localhost:3000/availability
 curl -s http://localhost:3000/input_schema
 curl -s http://localhost:3000/ready

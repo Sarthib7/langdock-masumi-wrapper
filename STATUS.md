@@ -15,7 +15,7 @@ Detailed wiring audit: [AUDIT.md](AUDIT.md).
 | MIP-003 `/availability` | Done | Returns `{status, type, message}`. Custom handler supported. |
 | Operator `/ready` | Done | Central readiness report for required Langdock/Masumi env, pricing, schema, and payment windows. |
 | MIP-003 `/input_schema` | Done | Served from `INPUT_SCHEMA_PATH` / `INPUT_SCHEMA_JSON` or a default `text` field. |
-| MIP-003 `/provide_input` (HITL) | Not started | Out of scope for initial listing — add when an agent actually needs human-in-loop. |
+| MIP-003 `/provide_input` (HITL) | Done | Optional Langdock chat mode via `HITL_CHAT_MODE=true`; jobs return `awaiting_input` after each answer until user sends `DONE`. |
 | MIP-004 input hashing | Done | JCS + SHA-256 over the canonical `{key, value}` array form. |
 | MIP-004 output hashing | Done | Computed in the runner after the handler returns. |
 | Masumi Payment Service integration | Done | `MasumiPaymentClient` registers the sale, polls status, submits the result hash. |
@@ -43,6 +43,16 @@ Detailed wiring audit: [AUDIT.md](AUDIT.md).
 - [x] Includes `input_hash` + `output_hash` when available.
 - [x] 400 on missing `job_id`, 404 on unknown `job_id`.
 - [x] Result mirrored as both `result` and `output` for client convenience.
+- [x] Includes `input_schema` and `message` when status is `awaiting_input`.
+
+### `POST /provide_input` — [src/routes/provideInput.ts](src/routes/provideInput.ts)
+- [x] Accepts `job_id` / `jobId` / `id` aliases.
+- [x] Accepts `input_data` / `inputData` as an object or MIP-003 `{key,value}` array.
+- [x] Computes a MIP-004 input hash for the added input.
+- [x] In `HITL_CHAT_MODE=true`, forwards follow-up text to Langdock with conversation history.
+- [x] Returns to `awaiting_input` after each assistant response.
+- [x] Exposes a HITL boolean `finish` control so Sokosumi can render a finish control without a dropdown.
+- [x] Completes and submits final transcript hash when the user sends `DONE` or submits `finish=true`.
 
 ### `GET /availability` — [src/routes/availability.ts](src/routes/availability.ts)
 - [x] Always 200 with `{status: "available", type: "masumi-agent", message}`.
@@ -84,6 +94,11 @@ Handler resolves
     └─▶ computeOutputHash
     └─▶ POST /payment/submit-result
          └─ buyer can now unlock payment
+
+HITL chat mode (`HITL_CHAT_MODE=true`)
+    └─▶ after FundsLocked, first Langdock answer sets status=awaiting_input
+    └─▶ POST /provide_input keeps appending user turns and calling Langdock
+    └─▶ user sends DONE → compute transcript output hash → submit-result
 ```
 
 ## Remaining Work Before Going Live
@@ -99,7 +114,7 @@ Handler resolves
    buy → result → unlock cycle before switching `NETWORK` to `Mainnet`.
 6. **Durable job store.** Current implementation is in-memory — fine for single-replica, but
    for HA swap `src/services/jobs.ts` for Redis or Postgres.
-7. **Optional: `/provide_input`** for agents that expose HITL steps.
+7. **Durable HITL state.** Current continuous chat history is in-memory; use Redis/Postgres before running multiple replicas or restarting during active chats.
 8. **Observability.** Fastify logger is on; add Prometheus metrics + tracing once this is
    deployed behind a real ingress.
 
