@@ -164,7 +164,7 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
     expect(json.status).toBe("awaiting_payment");
     expect(json.agentIdentifier).toBe("agent-xyz");
     expect(json.sellerVKey).toBe("addr_test1xyz");
-    expect(json.payByTime).toBe(1800000000);
+    expect(json.payByTime).toBe(1800000000000);
     expect(registerCalls).toBe(1);
 
     // Wait for the poller to see FundsLocked, run the handler, and submit.

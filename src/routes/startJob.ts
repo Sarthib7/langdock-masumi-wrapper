@@ -177,6 +177,8 @@ export function registerStartJob(
       });
     }
 
+    const toUnixMs = (unixSeconds: number): number => unixSeconds * 1000;
+
     const resBody: StartJobResponseBody = {
       id: jobId,
       job_id: jobId,
@@ -186,10 +188,10 @@ export function registerStartJob(
       identifierFromPurchaser,
       input_hash,
       inputHash: input_hash,
-      payByTime,
-      submitResultTime,
-      unlockTime,
-      externalDisputeUnlockTime,
+      payByTime: toUnixMs(payByTime),
+      submitResultTime: toUnixMs(submitResultTime),
+      unlockTime: toUnixMs(unlockTime),
+      externalDisputeUnlockTime: toUnixMs(externalDisputeUnlockTime),
       status: "awaiting_payment",
       amounts: config.priceAmounts,
     };
