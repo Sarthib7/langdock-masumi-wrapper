@@ -282,6 +282,16 @@ export function findAgentProfile(
   return config.agents.find((agent) => agent.slug === normalized);
 }
 
+/**
+ * Builds a runtime AppConfig scoped to a specific agent profile.
+ *
+ * Per-agent `priceAmounts` are intentionally excluded because the Masumi
+ * registry stores the pricing on-chain.  For Fixed pricing the Payment
+ * Service rejects `RequestedFunds`; for Dynamic pricing the wrapper should
+ * set `PRICE_AMOUNTS` globally (not per-agent).  Keeping the field empty
+ * here ensures `registerSale` never sends `RequestedFunds` for agents
+ * whose pricing is already fixed on-chain.
+ */
 export function configForAgentProfile(
   config: AppConfig,
   agent: AgentProfileConfig,
@@ -290,7 +300,7 @@ export function configForAgentProfile(
     ...config,
     langdockAgentId: agent.langdockAgentId,
     agentIdentifier: agent.agentIdentifier,
-    priceAmounts: agent.priceAmounts,
+    priceAmounts: [],
     inputSchema: agent.inputSchema,
   };
 }

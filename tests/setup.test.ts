@@ -640,12 +640,8 @@ describe("setup UI", () => {
         slug: "research",
         langdockAgentId: "langdock-research-agent",
         agentIdentifier: "asset_research_identifier_123",
-        priceAmounts: [
-          {
-            amount: "1000000",
-            unit: "16a55b2a349361ff88c03788f93e1e966e5d689605d044fef722ddde0014df10745553444d",
-          },
-        ],
+        // Fixed pricing: priceAmounts is intentionally empty at the profile level
+        priceAmounts: [],
       }),
     ]);
     const env = await readFile(process.env.SETUP_ENV_PATH!, "utf8");

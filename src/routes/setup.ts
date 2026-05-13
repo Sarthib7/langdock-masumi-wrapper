@@ -603,12 +603,13 @@ function agentProfileEnvPatch(
   const slug = normalizeAgentSlug(rawSlug || str(body.agentName) || "");
   if (!slug) throw new Error("Agent route slug is required for multi-agent setup.");
   const langdockAgentId = requireString(body.langdockAgentId, "Langdock Agent ID");
-  const pricingAmount = str(body.pricingAmount);
-  const pricingUnit = str(body.pricingUnit) || defaultPricingUnit(loadConfig().masumiNetwork);
-  const nextPriceAmounts =
-    pricingAmount && /^[0-9]+$/.test(pricingAmount)
-      ? [{ amount: pricingAmount, unit: pricingUnit }]
-      : undefined;
+  // Pricing is stored on-chain in the registry; keep the profile clean.
+  // const pricingAmount = str(body.pricingAmount);
+  // const pricingUnit = str(body.pricingUnit) || defaultPricingUnit(loadConfig().masumiNetwork);
+  // const nextPriceAmounts =
+  //   pricingAmount && /^[0-9]+$/.test(pricingAmount)
+  //     ? [{ amount: pricingAmount, unit: pricingUnit }]
+  //     : undefined;
 
   const existing = readStoredAgentProfiles();
   const index = existing.findIndex((item) => item.slug === slug);
@@ -620,7 +621,9 @@ function agentProfileEnvPatch(
     apiBaseUrl: str(body.agentApiBaseUrl) || previous?.apiBaseUrl || "",
     langdockAgentId,
     agentIdentifier: agentIdentifier || previous?.agentIdentifier || "",
-    priceAmounts: nextPriceAmounts || previous?.priceAmounts || [],
+    // Fixed pricing is stored on-chain in the registry; do NOT mirror it
+    // here or registerSale will send RequestedFunds and get a 400.
+    priceAmounts: [],
     inputSchema: previous?.inputSchema,
   };
 

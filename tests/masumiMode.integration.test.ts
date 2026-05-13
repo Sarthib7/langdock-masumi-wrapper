@@ -224,7 +224,8 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
             registerCalls += 1;
             const body = JSON.parse(init!.body!);
             expect(body.agentIdentifier).toBe("agent-paid-123");
-            expect(body.RequestedFunds).toEqual([{ amount: "2000000", unit: "unit-test" }]);
+            // Fixed pricing: wrapper must NOT send RequestedFunds
+            expect(body.RequestedFunds).toBeUndefined();
             return {
               ok: true,
               status: 200,
@@ -305,7 +306,7 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
       amounts: Array<{ amount: string; unit: string }>;
     };
     expect(json.agentIdentifier).toBe("agent-paid-123");
-    expect(json.amounts).toEqual([{ amount: "2000000", unit: "unit-test" }]);
+    expect(json.amounts).toEqual([]);
     expect(registerCalls).toBe(1);
 
     const { getJob } = await import("../src/services/jobs.js");
