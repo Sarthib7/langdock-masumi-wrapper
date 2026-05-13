@@ -16,6 +16,7 @@ describe("POST /start_job in direct mode with mocked Langdock", () => {
     delete process.env.MASUMI_PAYMENT_SERVICE_URL;
     delete process.env.MASUMI_PAYMENT_SERVICE_TOKEN;
     delete process.env.NODE_ENV;
+    delete process.env.AGENTS_JSON;
 
     vi.stubGlobal(
       "fetch",
@@ -43,6 +44,7 @@ describe("POST /start_job in direct mode with mocked Langdock", () => {
     delete process.env.LANGDOCK_API_KEY;
     delete process.env.LANGDOCK_AGENT_ID;
     delete process.env.PAYMENT_MODE;
+    delete process.env.AGENTS_JSON;
   });
 
   it("returns 200 and stores result for default Langdock handler", async () => {
@@ -130,6 +132,128 @@ describe("POST /start_job in direct mode with mocked Langdock", () => {
     };
     expect(body.result.receivedArray).toBe(true);
     expect(body.result.items).toEqual([{ key: "foo", value: 1 }]);
+
+    await app.close();
+  });
+
+  it("routes /agents/:slug/start_job to the configured Langdock agent", async () => {
+    process.env.LANGDOCK_API_KEY = "test-key";
+    process.env.AGENTS_JSON = JSON.stringify([
+      {
+        slug: "agent-one",
+        name: "Agent One",
+        description: "First test agent",
+        langdockAgentId: "langdock-agent-one",
+        agentIdentifier: "",
+        priceAmounts: [],
+      },
+      {
+        slug: "agent-two",
+        name: "Agent Two",
+        description: "Second test agent",
+        langdockAgentId: "langdock-agent-two",
+        agentIdentifier: "",
+        priceAmounts: [],
+      },
+    ]);
+
+    const seenAgentIds: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: { body?: string }) => {
+        const body = JSON.parse(init?.body ?? "{}") as { agentId: string };
+        seenAgentIds.push(body.agentId);
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              messages: [
+                {
+                  id: "m1",
+                  role: "assistant",
+                  parts: [{ type: "text", text: `hello from ${body.agentId}` }],
+                },
+              ],
+            }),
+        };
+      }) as unknown as typeof fetch,
+    );
+
+    const app = await buildApp();
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/agents/agent-two/start_job",
+      payload: {
+        identifier_from_purchaser: "job-2",
+        input_data: [{ key: "text", value: "ping" }],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const json = res.json() as { id: string };
+    const status = await app.inject({
+      method: "GET",
+      url: `/agents/agent-two/status?job_id=${json.id}`,
+    });
+    expect(status.statusCode).toBe(200);
+    expect((status.json() as { result: string }).result).toBe(
+      "hello from langdock-agent-two",
+    );
+    expect(seenAgentIds).toEqual(["langdock-agent-two"]);
+
+    const wrongAgentStatus = await app.inject({
+      method: "GET",
+      url: `/agents/agent-one/status?job_id=${json.id}`,
+    });
+    expect(wrongAgentStatus.statusCode).toBe(404);
+
+    await app.close();
+  });
+
+  it("serves per-agent availability and input schema", async () => {
+    process.env.AGENTS_JSON = JSON.stringify([
+      {
+        slug: "agent-one",
+        name: "Agent One",
+        description: "First test agent",
+        langdockAgentId: "langdock-agent-one",
+        inputSchema: [
+          {
+            id: "brief",
+            type: "string",
+            name: "Brief",
+          },
+        ],
+      },
+    ]);
+
+    const app = await buildApp({ endpointHandler: new AgentEndpointHandler() });
+
+    const availability = await app.inject({
+      method: "GET",
+      url: "/agents/agent-one/availability",
+    });
+    expect(availability.statusCode).toBe(200);
+    expect((availability.json() as { message: string }).message).toBe(
+      "Agent One is ready.",
+    );
+
+    const schema = await app.inject({
+      method: "GET",
+      url: "/agents/agent-one/input_schema",
+    });
+    expect(schema.statusCode).toBe(200);
+    expect(
+      (schema.json() as { input_data: Array<{ id: string }> }).input_data[0].id,
+    ).toBe("brief");
+
+    const missing = await app.inject({
+      method: "GET",
+      url: "/agents/missing/input_schema",
+    });
+    expect(missing.statusCode).toBe(404);
 
     await app.close();
   });

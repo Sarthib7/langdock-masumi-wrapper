@@ -91,6 +91,8 @@ export type AvailabilityResponseBody = {
 /** In-process job row. */
 export type JobRecord = {
   id: string;
+  /** Configured multi-agent route slug, when the job was started via `/agents/:slug/start_job`. */
+  agent_slug?: string;
   blockchainIdentifier: string;
   identifierFromPurchaser: string;
   input_hash: string;

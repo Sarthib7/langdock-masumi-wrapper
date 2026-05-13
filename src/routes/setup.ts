@@ -11,11 +11,13 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
+  AgentProfileConfig,
+  InputSchemaField,
   MasumiNetwork,
   PaymentApiAuthHeader,
   PaymentMode,
 } from "../config.js";
-import { loadConfig } from "../config.js";
+import { findAgentProfile, loadConfig, normalizeAgentSlug } from "../config.js";
 import type { BridgeContext } from "./bridgeContext.js";
 import { createLangdockStartJobHandler } from "../services/langdockStartJob.js";
 import {
@@ -62,6 +64,8 @@ type LangdockTestBody = {
 };
 
 type RegistrySetupBody = {
+  agentSlug?: unknown;
+  langdockAgentId?: unknown;
   agentName?: unknown;
   agentDescription?: unknown;
   agentApiBaseUrl?: unknown;
@@ -428,6 +432,7 @@ function redactConfigState(): Record<string, unknown> {
       langdockBaseUrl: config.langdockBaseUrl,
       langdockApiKey: config.langdockApiKey.length > 0,
       langdockAgentId: config.langdockAgentId.length > 0,
+      agentsCount: config.agents.length,
       paymentMode: config.paymentMode,
       paymentServiceUrl: config.paymentServiceUrl,
       paymentApiKey: config.paymentApiKey.length > 0,
@@ -438,6 +443,15 @@ function redactConfigState(): Record<string, unknown> {
       priceAmountsCount: config.priceAmounts.length,
       setupEnvPath: setupEnvPath(),
     },
+    agents: config.agents.map((agent) => ({
+      slug: agent.slug,
+      name: agent.name,
+      description: agent.description,
+      apiBaseUrl: agent.apiBaseUrl,
+      langdockAgentId: agent.langdockAgentId,
+      agentIdentifier: Boolean(agent.agentIdentifier),
+      priceAmountsCount: agent.priceAmounts.length,
+    })),
     registry: {
       agentApiBaseUrl: process.env.REGISTRY_AGENT_API_BASE_URL ?? "",
       agentName: process.env.REGISTRY_AGENT_NAME ?? "",
@@ -515,6 +529,126 @@ function registryEnvPatch(
   return patch;
 }
 
+type StoredAgentProfile = {
+  slug: string;
+  name: string;
+  description: string;
+  apiBaseUrl: string;
+  langdockAgentId: string;
+  agentIdentifier: string;
+  priceAmounts: Array<{ amount: string; unit: string }>;
+  inputSchema?: InputSchemaField[];
+};
+
+function isStoredInputSchemaField(item: unknown): item is InputSchemaField {
+  if (!item || typeof item !== "object") return false;
+  const record = item as Record<string, unknown>;
+  return (
+    typeof record.id === "string" &&
+    ["string", "number", "boolean", "option", "none"].includes(
+      typeof record.type === "string" ? record.type : "",
+    )
+  );
+}
+
+function readStoredAgentProfiles(): StoredAgentProfile[] {
+  const raw = process.env.AGENTS_JSON;
+  if (!raw?.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+      .map((item) => ({
+        slug: normalizeAgentSlug(str(item.slug) ?? str(item.name) ?? ""),
+        name: str(item.name) ?? "",
+        description: str(item.description) ?? "",
+        apiBaseUrl: str(item.apiBaseUrl) ?? "",
+        langdockAgentId: str(item.langdockAgentId) ?? "",
+        agentIdentifier: str(item.agentIdentifier) ?? "",
+        priceAmounts: Array.isArray(item.priceAmounts)
+          ? item.priceAmounts
+              .filter(
+                (amount): amount is { amount: string; unit: string } =>
+                  Boolean(amount) &&
+                  typeof amount === "object" &&
+                  typeof (amount as { amount?: unknown }).amount === "string" &&
+                  typeof (amount as { unit?: unknown }).unit === "string",
+              )
+              .map((amount) => ({
+                amount: amount.amount,
+                unit: amount.unit,
+              }))
+          : [],
+        inputSchema: Array.isArray(item.inputSchema)
+          ? item.inputSchema.filter(isStoredInputSchemaField)
+          : undefined,
+      }))
+      .filter((item) => item.slug && item.langdockAgentId);
+  } catch {
+    return [];
+  }
+}
+
+function agentProfileEnvPatch(
+  body: RegistrySetupBody,
+  agentIdentifier?: string,
+): EnvPatch {
+  const rawSlug = str(body.agentSlug);
+  const rawLangdockAgentId = str(body.langdockAgentId);
+  if (!rawSlug && !rawLangdockAgentId) {
+    return { updates: new Map(), deletes: new Set() };
+  }
+
+  const slug = normalizeAgentSlug(rawSlug || str(body.agentName) || "");
+  if (!slug) throw new Error("Agent route slug is required for multi-agent setup.");
+  const langdockAgentId = requireString(body.langdockAgentId, "Langdock Agent ID");
+  const pricingAmount = str(body.pricingAmount);
+  const pricingUnit = str(body.pricingUnit) || defaultPricingUnit(loadConfig().masumiNetwork);
+  const nextPriceAmounts =
+    pricingAmount && /^[0-9]+$/.test(pricingAmount)
+      ? [{ amount: pricingAmount, unit: pricingUnit }]
+      : undefined;
+
+  const existing = readStoredAgentProfiles();
+  const index = existing.findIndex((item) => item.slug === slug);
+  const previous = index >= 0 ? existing[index] : undefined;
+  const next: StoredAgentProfile = {
+    slug,
+    name: str(body.agentName) || previous?.name || slug,
+    description: str(body.agentDescription) || previous?.description || "",
+    apiBaseUrl: str(body.agentApiBaseUrl) || previous?.apiBaseUrl || "",
+    langdockAgentId,
+    agentIdentifier: agentIdentifier || previous?.agentIdentifier || "",
+    priceAmounts: nextPriceAmounts || previous?.priceAmounts || [],
+    inputSchema: previous?.inputSchema,
+  };
+
+  if (index >= 0) existing[index] = next;
+  else existing.push(next);
+
+  const patch: EnvPatch = { updates: new Map(), deletes: new Set() };
+  patch.updates.set("AGENTS_JSON", JSON.stringify(existing, null, 2));
+  return patch;
+}
+
+function persistAgentProfileIdentifier(slug: string, agentIdentifier: string): Promise<void> {
+  const existing = readStoredAgentProfiles();
+  const normalizedSlug = normalizeAgentSlug(slug);
+  const index = existing.findIndex((item) => item.slug === normalizedSlug);
+  if (index < 0) return Promise.resolve();
+  existing[index] = {
+    ...existing[index],
+    agentIdentifier,
+  };
+  return persistEnvPatch({
+    updates: new Map([["AGENTS_JSON", JSON.stringify(existing, null, 2)]]),
+    deletes: new Set(),
+  }).then(() => {
+    process.env.AGENTS_JSON = JSON.stringify(existing, null, 2);
+  });
+}
+
 function matchRegisteredAgent(assets: RegistryAgent[]): RegistryAgent | undefined {
   const identifier = process.env.AGENT_IDENTIFIER?.trim();
   const name = process.env.REGISTRY_AGENT_NAME?.trim();
@@ -526,6 +660,23 @@ function matchRegisteredAgent(assets: RegistryAgent[]): RegistryAgent | undefine
       return asset.name === name && asset.apiBaseUrl === apiBaseUrl;
     }
     if (name) return asset.name === name;
+    return false;
+  });
+}
+
+function matchRegisteredAgentForProfile(
+  assets: RegistryAgent[],
+  profile: AgentProfileConfig,
+): RegistryAgent | undefined {
+  return assets.find((asset) => {
+    if (profile.agentIdentifier && asset.agentIdentifier === profile.agentIdentifier) {
+      return true;
+    }
+    if (profile.name && profile.apiBaseUrl) {
+      return asset.name === profile.name && asset.apiBaseUrl === profile.apiBaseUrl;
+    }
+    if (profile.apiBaseUrl) return asset.apiBaseUrl === profile.apiBaseUrl;
+    if (profile.name) return asset.name === profile.name;
     return false;
   });
 }
@@ -1197,14 +1348,14 @@ function setupHtml(user?: AuthenticatedUser | null): string {
           </div>
           <div class="notice">
             <strong>Production safety:</strong>
-            <span>Use <code>SETUP_PASSWORD_HASH</code> instead of plaintext <code>SETUP_PASSWORD</code> when the deployment is public. Secrets entered here are not echoed back by the dashboard.</span>
+            <span>Set <code>SETUP_USERNAME</code> with either <code>SETUP_PASSWORD</code> or <code>SETUP_PASSWORD_HASH</code>. Secrets entered here are not echoed back by the dashboard.</span>
           </div>
           <details class="setup-guide">
             <summary>Credential guide</summary>
             <dl>
               <div>
                 <dt>Admin login</dt>
-                <dd>Protects this setup page. Set <code>SETUP_USERNAME</code> and preferably a bcrypt <code>SETUP_PASSWORD_HASH</code>. <a href="https://docs.railway.com/variables" target="_blank" rel="noreferrer">Railway variables</a></dd>
+                <dd>Protects this setup page. Set <code>SETUP_USERNAME</code> and either <code>SETUP_PASSWORD</code> or <code>SETUP_PASSWORD_HASH</code>. <a href="https://docs.railway.com/variables" target="_blank" rel="noreferrer">Railway variables</a></dd>
               </div>
               <div>
                 <dt>Langdock API key and Agent ID</dt>
@@ -1329,6 +1480,18 @@ function setupHtml(user?: AuthenticatedUser | null): string {
           <form id="registryForm" class="stack" novalidate>
           <fieldset>
             <legend>Public listing</legend>
+          <div class="row">
+            <label>
+              Agent route slug
+              <input name="agentSlug" type="text" autocomplete="off" spellcheck="false" placeholder="research-agent" />
+              <span class="hint">Creates /agents/{slug}/start_job, /status, /availability, and /input_schema.</span>
+            </label>
+            <label>
+              Langdock Agent ID
+              <input name="langdockAgentId" type="text" autocomplete="off" spellcheck="false" placeholder="langdock-agent-id" />
+              <span class="hint">The Langdock agent this slot calls at runtime.</span>
+            </label>
+          </div>
           <label>
             Public agent URL
             <input name="agentApiBaseUrl" type="url" inputmode="url" autocomplete="url" placeholder="https://your-agent.example.com" />
@@ -1544,6 +1707,8 @@ function setupHtml(user?: AuthenticatedUser | null): string {
 
     function blankAgentSlot() {
       return {
+        agentSlug: '',
+        langdockAgentId: '',
         agentApiBaseUrl: '',
         agentName: '',
         agentDescription: '',
@@ -1581,6 +1746,8 @@ function setupHtml(user?: AuthenticatedUser | null): string {
 
     function currentRegistryPayload() {
       return {
+        agentSlug: formValue(registryForm, 'agentSlug'),
+        langdockAgentId: formValue(registryForm, 'langdockAgentId'),
         agentApiBaseUrl: formValue(registryForm, 'agentApiBaseUrl'),
         agentName: formValue(registryForm, 'agentName'),
         agentDescription: formValue(registryForm, 'agentDescription'),
@@ -1606,6 +1773,7 @@ function setupHtml(user?: AuthenticatedUser | null): string {
         if (registryForm.elements[key]) registryForm.elements[key].value = value;
       }
       syncPricingUnit();
+      syncAgentBaseUrl();
     }
 
     function renderAgentSlots() {
@@ -1620,7 +1788,9 @@ function setupHtml(user?: AuthenticatedUser | null): string {
         const title = document.createElement('span');
         title.textContent = 'Agent ' + (index + 1) + ': ' + (slot.agentName || 'Empty agent');
         const subtitle = document.createElement('small');
-        subtitle.textContent = slot.agentApiBaseUrl || 'No public URL saved';
+        subtitle.textContent = slot.agentSlug
+          ? '/agents/' + slot.agentSlug
+          : slot.agentApiBaseUrl || 'No route slug saved';
         button.append(title, subtitle);
         button.addEventListener('click', () => {
           selectedAgentSlot = index;
@@ -1632,12 +1802,29 @@ function setupHtml(user?: AuthenticatedUser | null): string {
     }
 
     function isMeaningfullyBlankAgentSlot(slot) {
-      return !slot.agentApiBaseUrl && !slot.agentName && !slot.agentDescription && !slot.authorName;
+      return !slot.agentSlug && !slot.langdockAgentId && !slot.agentApiBaseUrl && !slot.agentName && !slot.agentDescription && !slot.authorName;
     }
 
-    function applyRegistryStateOnce(registry) {
-      if (registryEnvLoaded || !registry || typeof registry !== 'object') return;
+    function applyRegistryStateOnce(registry, agents) {
+      if (registryEnvLoaded) return;
       registryEnvLoaded = true;
+      if (Array.isArray(agents) && agents.length > 0) {
+        const slots = loadAgentSlots();
+        agents.slice(0, 4).forEach((agent, index) => {
+          slots[index] = Object.assign(blankAgentSlot(), slots[index] || {}, {
+            agentSlug: agent.slug || slots[index]?.agentSlug || '',
+            agentApiBaseUrl: agent.apiBaseUrl || slots[index]?.agentApiBaseUrl || '',
+            agentName: agent.name || slots[index]?.agentName || '',
+            agentDescription: agent.description || slots[index]?.agentDescription || '',
+            langdockAgentId: agent.langdockAgentId || slots[index]?.langdockAgentId || '',
+          });
+        });
+        saveAgentSlots(slots);
+        applyAgentSlot(slots[selectedAgentSlot]);
+        renderAgentSlots();
+        return;
+      }
+      if (!registry || typeof registry !== 'object') return;
       const serverSlot = blankAgentSlot();
       for (const [key, value] of Object.entries(registry)) {
         if (typeof value === 'string' && value.trim()) serverSlot[key] = value;
@@ -1652,6 +1839,7 @@ function setupHtml(user?: AuthenticatedUser | null): string {
     }
 
     function saveCurrentAgentSlot() {
+      syncAgentBaseUrl();
       const slots = loadAgentSlots();
       slots[selectedAgentSlot] = currentRegistryPayload();
       saveAgentSlots(slots);
@@ -1697,6 +1885,28 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       }
     }
 
+    function normalizeSlug(value) {
+      return value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 64);
+    }
+
+    function syncAgentBaseUrl() {
+      const slugField = registryForm.elements.agentSlug;
+      const urlField = registryForm.elements.agentApiBaseUrl;
+      const normalized = normalizeSlug(slugField.value);
+      if (slugField.value && slugField.value !== normalized) slugField.value = normalized;
+      if (!normalized) return;
+      const generated = window.location.origin + '/agents/' + normalized;
+      if (!urlField.value.trim() || urlField.dataset.generated === 'true') {
+        urlField.value = generated;
+        urlField.dataset.generated = 'true';
+      }
+    }
+
     function populateConfigControls(configured) {
       if (!configured || typeof configured !== 'object') return;
       configForm.elements.langdockBaseUrl.value = configured.langdockBaseUrl || 'https://api.langdock.com';
@@ -1719,7 +1929,7 @@ function setupHtml(user?: AuthenticatedUser | null): string {
 
     function renderState(data) {
       const report = data.report || {};
-      applyRegistryStateOnce(data.registry);
+      applyRegistryStateOnce(data.registry, data.agents);
       populateConfigControls(data.configured);
       const ready = report.status === 'ready';
       readyBadge.textContent = ready ? 'Ready' : 'Not ready';
@@ -1823,12 +2033,21 @@ function setupHtml(user?: AuthenticatedUser | null): string {
         registryForm.elements.pricingUnit.value = selectedNetwork() === 'Mainnet' ? MAINNET_USDCX_UNIT : PREPROD_TUSDM_UNIT;
       }
     });
+    registryForm.elements.agentSlug.addEventListener('blur', syncAgentBaseUrl);
+    registryForm.elements.agentSlug.addEventListener('input', () => {
+      registryForm.elements.agentApiBaseUrl.dataset.generated = 'true';
+    });
+    registryForm.elements.agentApiBaseUrl.addEventListener('input', () => {
+      registryForm.elements.agentApiBaseUrl.dataset.generated = 'false';
+    });
 
     async function refreshRegistryStatus(triggerButton) {
       setButtonLoading(triggerButton, true, 'Refreshing...');
       setMessage(registryMessage, 'Loading registry...', '');
       try {
-        const res = await fetch('/setup/registry/status', {
+        const slug = formValue(registryForm, 'agentSlug');
+        const url = '/setup/registry/status' + (slug ? '?agentSlug=' + encodeURIComponent(slug) : '');
+        const res = await fetch(url, {
           headers: setupHeaders()
         });
         const data = await res.json();
@@ -1850,8 +2069,11 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       setButtonLoading(registerAgent, true, 'Registering...');
       registryForm.setAttribute('aria-busy', 'true');
       syncPricingUnit();
+      syncAgentBaseUrl();
       setMessage(registryMessage, 'Submitting registration...', '');
       const payload = {
+        agentSlug: formValue(registryForm, 'agentSlug'),
+        langdockAgentId: formValue(registryForm, 'langdockAgentId'),
         agentApiBaseUrl: formValue(registryForm, 'agentApiBaseUrl'),
         agentName: formValue(registryForm, 'agentName'),
         agentDescription: formValue(registryForm, 'agentDescription'),
@@ -2277,8 +2499,13 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
       const authorName = requireString(body.authorName, "Author name");
       const exampleOutputs = normalizeRegistryExampleOutputs(body.exampleOutputs);
       const registryPatch = registryEnvPatch(body, exampleOutputs);
+      const draftAgentPatch = agentProfileEnvPatch(body);
       await persistEnvPatch(registryPatch);
       applyEnvPatch(registryPatch);
+      if (draftAgentPatch.updates.size > 0 || draftAgentPatch.deletes.size > 0) {
+        await persistEnvPatch(draftAgentPatch);
+        applyEnvPatch(draftAgentPatch);
+      }
 
       const client = configuredPaymentClient();
       const result = await client.registerAgent({
@@ -2309,7 +2536,12 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
       });
 
       if (result.agentIdentifier) {
-        await persistAgentIdentifier(result.agentIdentifier);
+        const slug = str(body.agentSlug);
+        if (slug) {
+          await persistAgentProfileIdentifier(slug, result.agentIdentifier);
+        } else {
+          await persistAgentIdentifier(result.agentIdentifier);
+        }
       }
 
       return reply.status(200).send({
@@ -2336,7 +2568,9 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
     }
   });
 
-  app.get("/setup/registry/status", async (request, reply) => {
+  app.get<{ Querystring: { agentSlug?: string } }>(
+    "/setup/registry/status",
+    async (request, reply) => {
     if (!await requestHasSetupAccess(request)) {
       return reply.status(401).send({
         error: "SETUP_ACCESS_DENIED",
@@ -2358,14 +2592,29 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
     try {
       const client = configuredPaymentClient();
       const assets = await client.listRegistry();
-      const match = matchRegisteredAgent(assets);
+      const requestedSlug = str(request.query.agentSlug);
+      const profile = requestedSlug
+        ? findAgentProfile(loadConfig(), requestedSlug)
+        : undefined;
+      if (requestedSlug && !profile) {
+        return reply.status(404).send({
+          error: "AGENT_NOT_FOUND",
+          message: `No agent is configured for slug: ${requestedSlug}`,
+          assets,
+        });
+      }
+      const match = profile
+        ? matchRegisteredAgentForProfile(assets, profile)
+        : matchRegisteredAgent(assets);
       const agentIdentifier =
         typeof match?.agentIdentifier === "string" ? match.agentIdentifier : undefined;
       if (agentIdentifier) {
-        await persistAgentIdentifier(agentIdentifier);
+        if (profile) await persistAgentProfileIdentifier(profile.slug, agentIdentifier);
+        else await persistAgentIdentifier(agentIdentifier);
       }
 
       return reply.status(200).send({
+        agentSlug: profile?.slug,
         agentIdentifier,
         state: typeof match?.state === "string" ? match.state : undefined,
         matchedAgent: match,

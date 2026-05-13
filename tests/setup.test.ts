@@ -26,6 +26,7 @@ function resetEnv(): void {
   delete process.env.MASUMI_NETWORK;
   delete process.env.AGENT_IDENTIFIER;
   delete process.env.SELLER_VKEY;
+  delete process.env.AGENTS_JSON;
   delete process.env.PRICE_AMOUNTS;
   delete process.env.SETUP_ACCESS_TOKEN;
   delete process.env.SETUP_USERNAME;
@@ -567,6 +568,89 @@ describe("setup UI", () => {
     expect(env).toContain("REGISTRY_EXAMPLE_OUTPUTS=");
     expect(env).toContain("REGISTRY_LEGAL_TERMS=https://example.com/terms");
     expect(env).toContain("AGENT_IDENTIFIER=asset_identifier_123");
+
+    await app.close();
+  });
+
+  it("registers a routed agent profile and persists its identifier in AGENTS_JSON", async () => {
+    const fetchMock = vi.fn(async (url: URL | RequestInfo, init?: RequestInit) => {
+      expect(String(url)).toBe("https://payment.example.com/api/v1/registry/");
+      expect(init?.method).toBe("POST");
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        network: "Preprod",
+        sellingWalletVkey: "seller-vkey",
+        name: "Research Agent",
+        description: "Agent for research jobs",
+        apiBaseUrl: "https://agent.example.com/agents/research",
+      });
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            status: "success",
+            data: {
+              state: "RegistrationRequested",
+              agentIdentifier: "asset_research_identifier_123",
+            },
+          }),
+      };
+    }) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
+    process.env.PAYMENT_API_KEY = "payment-admin-key";
+    process.env.PAYMENT_API_AUTH_HEADER = "token";
+    process.env.SELLER_VKEY = "seller-vkey";
+    process.env.NETWORK = "Preprod";
+
+    const app = await buildApp();
+    const cookie = await sessionCookie(app);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/setup/registry/register",
+      headers: { cookie },
+      payload: {
+        agentSlug: "research",
+        langdockAgentId: "langdock-research-agent",
+        agentName: "Research Agent",
+        agentDescription: "Agent for research jobs",
+        agentApiBaseUrl: "https://agent.example.com/agents/research",
+        capabilityName: "langdock-agent",
+        capabilityVersion: "1.0.0",
+        authorName: "Test Author",
+        tags: "research,langdock",
+        pricingAmount: "1000000",
+        pricingUnit:
+          "16a55b2a349361ff88c03788f93e1e966e5d689605d044fef722ddde0014df10745553444d",
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const profiles = JSON.parse(process.env.AGENTS_JSON ?? "[]") as Array<{
+      slug: string;
+      langdockAgentId: string;
+      agentIdentifier: string;
+      priceAmounts: Array<{ amount: string; unit: string }>;
+    }>;
+    expect(profiles).toEqual([
+      expect.objectContaining({
+        slug: "research",
+        langdockAgentId: "langdock-research-agent",
+        agentIdentifier: "asset_research_identifier_123",
+        priceAmounts: [
+          {
+            amount: "1000000",
+            unit: "16a55b2a349361ff88c03788f93e1e966e5d689605d044fef722ddde0014df10745553444d",
+          },
+        ],
+      }),
+    ]);
+    const env = await readFile(process.env.SETUP_ENV_PATH!, "utf8");
+    expect(env).toContain("AGENTS_JSON=");
+    expect(env).not.toContain("AGENT_IDENTIFIER=asset_research_identifier_123");
 
     await app.close();
   });

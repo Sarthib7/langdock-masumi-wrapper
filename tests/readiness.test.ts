@@ -28,6 +28,7 @@ function resetEnv(): void {
   delete process.env.MASUMI_NETWORK;
   delete process.env.AGENT_IDENTIFIER;
   delete process.env.SELLER_VKEY;
+  delete process.env.AGENTS_JSON;
   delete process.env.PRICE_AMOUNTS;
   delete process.env.INPUT_SCHEMA_JSON;
   delete process.env.INPUT_SCHEMA_PATH;
@@ -77,6 +78,36 @@ describe("getReadinessReport", () => {
     expect(report.status).toBe("ready");
   });
 
+  it("accepts direct-mode routed agents without a global Langdock agent id", () => {
+    resetEnv();
+    process.env.PAYMENT_MODE = "direct";
+    process.env.LANGDOCK_API_KEY = "ld-key";
+    process.env.AGENTS_JSON = JSON.stringify([
+      {
+        slug: "agent-one",
+        name: "Agent One",
+        apiBaseUrl: "https://wrapper.example.com/agents/agent-one",
+        langdockAgentId: "langdock-agent-one",
+      },
+      {
+        slug: "agent-two",
+        name: "Agent Two",
+        apiBaseUrl: "https://wrapper.example.com/agents/agent-two",
+        langdockAgentId: "langdock-agent-two",
+      },
+    ]);
+    setAdminEnv();
+    process.env.PRICE_AMOUNTS = JSON.stringify([
+      { amount: "1000000", unit: PREPROD_TUSDM_UNIT },
+    ]);
+
+    const report = getReadinessReport(loadConfig());
+    expect(report.status).toBe("ready");
+    expect(report.issues).not.toContainEqual(
+      expect.objectContaining({ env: expect.arrayContaining(["LANGDOCK_AGENT_ID"]) }),
+    );
+  });
+
   it("accepts username and plaintext password setup without readiness warnings", () => {
     resetEnv();
     process.env.PAYMENT_MODE = "direct";
@@ -115,6 +146,70 @@ describe("getReadinessReport", () => {
         "PAYMENT_SERVICE_URL",
         "PAYMENT_API_KEY",
       ]),
+    );
+  });
+
+  it("accepts masumi-mode routed agents with per-agent identifiers", () => {
+    resetEnv();
+    process.env.PAYMENT_MODE = "masumi";
+    process.env.LANGDOCK_API_KEY = "ld-key";
+    process.env.AGENTS_JSON = JSON.stringify([
+      {
+        slug: "agent-one",
+        name: "Agent One",
+        apiBaseUrl: "https://wrapper.example.com/agents/agent-one",
+        langdockAgentId: "langdock-agent-one",
+        agentIdentifier: "agent-identifier-one",
+      },
+      {
+        slug: "agent-two",
+        name: "Agent Two",
+        apiBaseUrl: "https://wrapper.example.com/agents/agent-two",
+        langdockAgentId: "langdock-agent-two",
+        agentIdentifier: "agent-identifier-two",
+      },
+    ]);
+    setAdminEnv();
+    process.env.SELLER_VKEY = "seller-vkey";
+    process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
+    process.env.PAYMENT_API_KEY = "payment-token";
+    process.env.PRICE_AMOUNTS = JSON.stringify([
+      { amount: "1000000", unit: PREPROD_TUSDM_UNIT },
+    ]);
+
+    const report = getReadinessReport(loadConfig());
+    expect(report.status).toBe("ready");
+    expect(report.issues).not.toContainEqual(
+      expect.objectContaining({ env: expect.arrayContaining(["AGENT_IDENTIFIER"]) }),
+    );
+  });
+
+  it("requires per-agent identifiers for routed agents in masumi mode", () => {
+    resetEnv();
+    process.env.PAYMENT_MODE = "masumi";
+    process.env.LANGDOCK_API_KEY = "ld-key";
+    process.env.AGENTS_JSON = JSON.stringify([
+      {
+        slug: "agent-one",
+        langdockAgentId: "langdock-agent-one",
+      },
+    ]);
+    setAdminEnv();
+    process.env.SELLER_VKEY = "seller-vkey";
+    process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
+    process.env.PAYMENT_API_KEY = "payment-token";
+    process.env.PRICE_AMOUNTS = JSON.stringify([
+      { amount: "1000000", unit: PREPROD_TUSDM_UNIT },
+    ]);
+
+    const report = getReadinessReport(loadConfig());
+    expect(report.status).toBe("not_ready");
+    expect(report.issues).toContainEqual(
+      expect.objectContaining({
+        code: "missing_agent_profile_identifier",
+        message:
+          "Agent profile \"agent-one\" needs agentIdentifier before /agents/agent-one/start_job can run in masumi mode.",
+      }),
     );
   });
 

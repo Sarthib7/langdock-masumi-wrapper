@@ -5,7 +5,12 @@
  * safety is enforced in one place instead of scattered across request handlers.
  */
 
-import type { AppConfig, InputSchemaField, PriceAmount } from "../config.js";
+import type {
+  AgentProfileConfig,
+  AppConfig,
+  InputSchemaField,
+  PriceAmount,
+} from "../config.js";
 import { MAINNET_USDCX_UNIT, PREPROD_TUSDM_UNIT } from "./sokosumiTokens.js";
 
 export type ReadinessSeverity = "error" | "warning";
@@ -298,10 +303,58 @@ function validateInputSchema(
   }
 }
 
+function validateAgentProfiles(
+  config: AppConfig,
+  issues: ReadinessIssue[],
+): void {
+  if (hasValue(rawEnv("AGENTS_JSON")) && config.agents.length === 0) {
+    issues.push({
+      severity: "error",
+      code: "invalid_agents_json",
+      env: ["AGENTS_JSON"],
+      message:
+        "AGENTS_JSON is set but no valid agent profiles were loaded. Each profile needs a slug or name and langdockAgentId.",
+    });
+    return;
+  }
+
+  const seenApiBaseUrls = new Set<string>();
+  for (const agent of config.agents) {
+    if (!hasValue(agent.apiBaseUrl)) continue;
+
+    if (!isHttpUrl(agent.apiBaseUrl)) {
+      issues.push({
+        severity: "error",
+        code: "invalid_agent_profile_url",
+        env: ["AGENTS_JSON"],
+        message: `Agent profile "${agent.slug}" apiBaseUrl must be an http(s) URL.`,
+      });
+    } else {
+      validateHttpsUnlessLocal(agent.apiBaseUrl, ["AGENTS_JSON"], issues);
+    }
+
+    if (seenApiBaseUrls.has(agent.apiBaseUrl)) {
+      issues.push({
+        severity: "warning",
+        code: "duplicate_agent_profile_url",
+        env: ["AGENTS_JSON"],
+        message: `Multiple agent profiles use apiBaseUrl ${agent.apiBaseUrl}; each Masumi registration should normally use a unique /agents/<slug> URL.`,
+      });
+    }
+    seenApiBaseUrls.add(agent.apiBaseUrl);
+  }
+}
+
+function missingMasumiIdentifiers(
+  agents: AgentProfileConfig[],
+): AgentProfileConfig[] {
+  return agents.filter((agent) => !hasValue(agent.agentIdentifier));
+}
+
 export function productionRequiredEnv(config: AppConfig): string[] {
   const required = [
     "LANGDOCK_API_KEY",
-    "LANGDOCK_AGENT_ID",
+    "LANGDOCK_AGENT_ID or AGENTS_JSON[].langdockAgentId",
     "PAYMENT_MODE",
     "SETUP_USERNAME",
     "SETUP_PASSWORD_HASH or SETUP_PASSWORD",
@@ -309,7 +362,7 @@ export function productionRequiredEnv(config: AppConfig): string[] {
   ];
   if (config.paymentMode === "masumi") {
     required.push(
-      "AGENT_IDENTIFIER",
+      "AGENT_IDENTIFIER or AGENTS_JSON[].agentIdentifier",
       "SELLER_VKEY",
       "PAYMENT_SERVICE_URL",
       "PAYMENT_API_KEY",
@@ -329,11 +382,13 @@ export function getReadinessReport(config: AppConfig): ReadinessReport {
       "Langdock API key is required before this wrapper can run paid jobs.",
     );
   }
-  if (!hasValue(config.langdockAgentId)) {
+  validateAgentProfiles(config, issues);
+
+  if (!hasValue(config.langdockAgentId) && config.agents.length === 0) {
     pushMissing(
       issues,
-      ["LANGDOCK_AGENT_ID"],
-      "Langdock agent id is required before this wrapper can run paid jobs.",
+      ["LANGDOCK_AGENT_ID", "AGENTS_JSON"],
+      "A Langdock agent id is required via LANGDOCK_AGENT_ID or at least one AGENTS_JSON profile before this wrapper can run paid jobs.",
     );
   }
   if (!isHttpUrl(config.langdockBaseUrl)) {
@@ -364,11 +419,21 @@ export function getReadinessReport(config: AppConfig): ReadinessReport {
   }
 
   if (config.paymentMode === "masumi") {
-    if (!hasValue(config.agentIdentifier)) {
+    const missingProfileIdentifiers = missingMasumiIdentifiers(config.agents);
+    for (const agent of missingProfileIdentifiers) {
+      issues.push({
+        severity: "error",
+        code: "missing_agent_profile_identifier",
+        env: ["AGENTS_JSON"],
+        message: `Agent profile "${agent.slug}" needs agentIdentifier before /agents/${agent.slug}/start_job can run in masumi mode.`,
+      });
+    }
+
+    if (config.agents.length === 0 && !hasValue(config.agentIdentifier)) {
       pushMissing(
         issues,
-        ["AGENT_IDENTIFIER"],
-        "Masumi mode requires the agent identifier from the registry/admin dashboard.",
+        ["AGENT_IDENTIFIER", "AGENTS_JSON"],
+        "Masumi mode requires AGENT_IDENTIFIER for the legacy endpoint or agentIdentifier on each AGENTS_JSON profile.",
       );
     }
     if (!hasValue(config.sellerVKey)) {
@@ -424,6 +489,7 @@ export function getReadinessReport(config: AppConfig): ReadinessReport {
       "PAYMENT_POLL_TIMEOUT_MS",
       "PAYMENT_API_AUTH_HEADER",
       "PRICE_AMOUNTS",
+      "AGENTS_JSON",
       "MASUMI_PAYMENT_SERVICE_URL (legacy alias)",
       "MASUMI_PAYMENT_SERVICE_TOKEN (legacy alias)",
       "MASUMI_NETWORK (legacy alias)",

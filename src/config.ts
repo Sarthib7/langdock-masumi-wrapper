@@ -21,6 +21,17 @@ export type PriceAmount = {
   unit: string;
 };
 
+export type AgentProfileConfig = {
+  slug: string;
+  name: string;
+  description: string;
+  apiBaseUrl: string;
+  langdockAgentId: string;
+  agentIdentifier: string;
+  priceAmounts: PriceAmount[];
+  inputSchema: InputSchemaField[];
+};
+
 export type AppConfig = {
   port: number;
 
@@ -52,6 +63,7 @@ export type AppConfig = {
   externalDisputeUnlockOffsetSec: number;
 
   inputSchema: InputSchemaField[];
+  agents: AgentProfileConfig[];
 
   /** When true, Langdock jobs stay open for repeated /provide_input turns until user sends DONE. */
   hitlChatMode: boolean;
@@ -84,8 +96,12 @@ function parsePriceAmounts(raw: string | undefined): PriceAmount[] {
   if (!raw || !raw.trim()) {
     return [];
   }
+  return parsePriceAmountsValue(raw);
+}
+
+function parsePriceAmountsValue(value: unknown): PriceAmount[] {
   try {
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
     if (Array.isArray(parsed)) {
       const out: PriceAmount[] = [];
       for (const item of parsed) {
@@ -109,6 +125,41 @@ function parsePriceAmounts(raw: string | undefined): PriceAmount[] {
   return [];
 }
 
+function isInputSchemaField(item: unknown): item is InputSchemaField {
+  if (!item || typeof item !== "object") return false;
+  const record = item as Record<string, unknown>;
+  return (
+    typeof record.id === "string" &&
+    ["string", "number", "boolean", "option", "none"].includes(
+      typeof record.type === "string" ? record.type : "",
+    )
+  );
+}
+
+function parseInputSchemaValue(value: unknown): InputSchemaField[] {
+  const parsed = typeof value === "string" ? safeJsonParse(value) : value;
+  if (Array.isArray(parsed) && parsed.every(isInputSchemaField)) {
+    return parsed;
+  }
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    Array.isArray((parsed as { input_data?: unknown }).input_data) &&
+    (parsed as { input_data: unknown[] }).input_data.every(isInputSchemaField)
+  ) {
+    return (parsed as { input_data: InputSchemaField[] }).input_data;
+  }
+  return [];
+}
+
+function safeJsonParse(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
 function parsePaymentApiAuthHeader(
   raw: string | undefined,
   paymentServiceUrl: string,
@@ -126,15 +177,8 @@ function loadInputSchema(): InputSchemaField[] {
   if (path && path.trim()) {
     try {
       const raw = readFileSync(path, "utf8");
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) return parsed as InputSchemaField[];
-      if (
-        parsed &&
-        typeof parsed === "object" &&
-        Array.isArray((parsed as { input_data?: unknown }).input_data)
-      ) {
-        return (parsed as { input_data: InputSchemaField[] }).input_data;
-      }
+      const parsed = parseInputSchemaValue(raw);
+      if (parsed.length > 0) return parsed;
     } catch {
       // fall through to default
     }
@@ -142,12 +186,8 @@ function loadInputSchema(): InputSchemaField[] {
 
   const inline = process.env.INPUT_SCHEMA_JSON;
   if (inline && inline.trim()) {
-    try {
-      const parsed = JSON.parse(inline) as unknown;
-      if (Array.isArray(parsed)) return parsed as InputSchemaField[];
-    } catch {
-      // fall through to default
-    }
+    const parsed = parseInputSchemaValue(inline);
+    if (parsed.length > 0) return parsed;
   }
 
   return [
@@ -163,6 +203,65 @@ function loadInputSchema(): InputSchemaField[] {
   ];
 }
 
+export function normalizeAgentSlug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+}
+
+function parseAgentProfiles(
+  raw: string | undefined,
+  inheritedPriceAmounts: PriceAmount[],
+  inheritedInputSchema: InputSchemaField[],
+): AgentProfileConfig[] {
+  if (!raw?.trim()) return [];
+  const parsed = safeJsonParse(raw);
+  if (!Array.isArray(parsed)) return [];
+
+  const profiles: AgentProfileConfig[] = [];
+  const seen = new Set<string>();
+  for (const item of parsed) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const rawSlug =
+      typeof record.slug === "string"
+        ? record.slug
+        : typeof record.name === "string"
+          ? record.name
+          : "";
+    const slug = normalizeAgentSlug(rawSlug);
+    const langdockAgentId =
+      typeof record.langdockAgentId === "string"
+        ? record.langdockAgentId.trim()
+        : "";
+    if (!slug || seen.has(slug) || !langdockAgentId) continue;
+    seen.add(slug);
+
+    const priceAmounts = parsePriceAmountsValue(record.priceAmounts);
+    const inputSchema = parseInputSchemaValue(record.inputSchema);
+    profiles.push({
+      slug,
+      name: typeof record.name === "string" ? record.name.trim() : slug,
+      description:
+        typeof record.description === "string" ? record.description.trim() : "",
+      apiBaseUrl:
+        typeof record.apiBaseUrl === "string" ? record.apiBaseUrl.trim() : "",
+      langdockAgentId,
+      agentIdentifier:
+        typeof record.agentIdentifier === "string"
+          ? record.agentIdentifier.trim()
+          : "",
+      priceAmounts:
+        priceAmounts.length > 0 ? priceAmounts : inheritedPriceAmounts,
+      inputSchema: inputSchema.length > 0 ? inputSchema : inheritedInputSchema,
+    });
+  }
+  return profiles;
+}
+
 export function resolveAgentDisplayIdentity(config: AppConfig): {
   agentIdentifier: string;
   sellerVKey: string;
@@ -172,6 +271,27 @@ export function resolveAgentDisplayIdentity(config: AppConfig): {
   return {
     agentIdentifier,
     sellerVKey: config.sellerVKey.trim(),
+  };
+}
+
+export function findAgentProfile(
+  config: AppConfig,
+  slug: string,
+): AgentProfileConfig | undefined {
+  const normalized = normalizeAgentSlug(slug);
+  return config.agents.find((agent) => agent.slug === normalized);
+}
+
+export function configForAgentProfile(
+  config: AppConfig,
+  agent: AgentProfileConfig,
+): AppConfig {
+  return {
+    ...config,
+    langdockAgentId: agent.langdockAgentId,
+    agentIdentifier: agent.agentIdentifier,
+    priceAmounts: agent.priceAmounts,
+    inputSchema: agent.inputSchema,
   };
 }
 
@@ -197,6 +317,8 @@ export function loadConfig(): AppConfig {
         : paymentServiceUrl
           ? "masumi"
           : "direct";
+  const priceAmounts = parsePriceAmounts(process.env.PRICE_AMOUNTS);
+  const inputSchema = loadInputSchema();
 
   return {
     port: numEnv("PORT", 3000),
@@ -220,7 +342,7 @@ export function loadConfig(): AppConfig {
     paymentPollIntervalMs: numEnv("PAYMENT_POLL_INTERVAL_MS", 5000),
     paymentPollTimeoutMs: numEnv("PAYMENT_POLL_TIMEOUT_MS", 30 * 60 * 1000),
 
-    priceAmounts: parsePriceAmounts(process.env.PRICE_AMOUNTS),
+    priceAmounts,
 
     // Monotonic by default: payByTime < submitResultTime < unlockTime < externalDisputeUnlockTime.
     // Payment Service rejects <5 min gap between payByTime and submitResultTime.
@@ -232,7 +354,12 @@ export function loadConfig(): AppConfig {
       5400, // 90 min
     ),
 
-    inputSchema: loadInputSchema(),
+    inputSchema,
+    agents: parseAgentProfiles(
+      process.env.AGENTS_JSON,
+      priceAmounts,
+      inputSchema,
+    ),
     hitlChatMode: boolEnv("HITL_CHAT_MODE") || boolEnv("LANGDOCK_HITL_CHAT_MODE"),
   };
 }

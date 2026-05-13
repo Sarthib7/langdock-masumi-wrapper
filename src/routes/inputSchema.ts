@@ -4,12 +4,31 @@
  * sensible `text` default.
  */
 
-import type { FastifyInstance } from "fastify";
-import { loadConfig } from "../config.js";
+import type { FastifyInstance, FastifyReply } from "fastify";
+import { configForAgentProfile, findAgentProfile, loadConfig } from "../config.js";
 
 export function registerInputSchema(app: FastifyInstance): void {
-  app.get("/input_schema", async (_request, reply) => {
-    const config = loadConfig();
+  async function handleInputSchema(reply: FastifyReply, agentSlug?: string) {
+    const baseConfig = loadConfig();
+    const agent = agentSlug ? findAgentProfile(baseConfig, agentSlug) : undefined;
+    if (agentSlug && !agent) {
+      return reply.status(404).send({
+        error: "AGENT_NOT_FOUND",
+        message: `No agent is configured for slug: ${agentSlug}`,
+      });
+    }
+    const config = agent ? configForAgentProfile(baseConfig, agent) : baseConfig;
     return reply.status(200).send({ input_data: config.inputSchema });
+  }
+
+  app.get("/input_schema", async (_request, reply) => {
+    return handleInputSchema(reply);
   });
+
+  app.get<{ Params: { agentSlug: string } }>(
+    "/agents/:agentSlug/input_schema",
+    async (request, reply) => {
+      return handleInputSchema(reply, request.params.agentSlug);
+    },
+  );
 }

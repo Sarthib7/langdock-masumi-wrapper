@@ -12,11 +12,18 @@
  *    asynchronously for local development.
  */
 
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
 import type { BridgeContext } from "./bridgeContext.js";
-import { loadConfig, resolveAgentDisplayIdentity } from "../config.js";
+import {
+  configForAgentProfile,
+  findAgentProfile,
+  loadConfig,
+  resolveAgentDisplayIdentity,
+  type AgentProfileConfig,
+} from "../config.js";
 import { computeInputHash } from "../services/hashing.js";
+import { createLangdockStartJobHandler } from "../services/langdockStartJob.js";
 import { createJob } from "../services/jobs.js";
 import { runDirect, runWithPayment } from "../services/jobRunner.js";
 import { generateOpaqueToken, hashOpaqueToken } from "../services/opaqueTokens.js";
@@ -31,14 +38,22 @@ import {
   normalizeStartJobBody,
 } from "../utils/startJobBody.js";
 
+type StartJobParams = {
+  agentSlug?: string;
+};
+
 export function registerStartJob(
   app: FastifyInstance,
   ctx: BridgeContext,
 ): void {
-  app.post("/start_job", async (request, reply) => {
+  async function handleStartJob(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    routeAgentSlug?: string,
+  ) {
     const rateLimit = checkRateLimit({
       scope: "start-job",
-      identifier: request.ip,
+      identifier: routeAgentSlug ? `${request.ip}:${routeAgentSlug}` : request.ip,
       limit: 60,
       windowMs: 60 * 1000,
     });
@@ -55,6 +70,22 @@ export function registerStartJob(
         });
     }
 
+    const baseConfig = loadConfig();
+    let routeAgent: AgentProfileConfig | undefined;
+    const requestedAgentSlug = routeAgentSlug?.trim();
+    if (requestedAgentSlug) {
+      routeAgent = findAgentProfile(baseConfig, requestedAgentSlug);
+      if (!routeAgent) {
+        return reply.status(404).send({
+          error: "AGENT_NOT_FOUND",
+          message: `No agent is configured for slug: ${requestedAgentSlug}`,
+        });
+      }
+    }
+    const config = routeAgent
+      ? configForAgentProfile(baseConfig, routeAgent)
+      : baseConfig;
+
     const body =
       request.body && typeof request.body === "object" && !Array.isArray(request.body)
         ? (request.body as Record<string, unknown>)
@@ -62,7 +93,9 @@ export function registerStartJob(
 
     const { identifierFromPurchaser, inputData } = normalizeStartJobBody(body);
 
-    const startHandler = ctx.endpointHandler.getStartJobHandler();
+    const startHandler = routeAgent
+      ? createLangdockStartJobHandler(config)
+      : ctx.endpointHandler.getStartJobHandler();
     if (!startHandler) {
       return reply.status(500).send({
         error: "START_JOB_HANDLER_MISSING",
@@ -82,7 +115,6 @@ export function registerStartJob(
     }
 
     const jobId = randomUUID();
-    const config = loadConfig();
     if (process.env.NODE_ENV === "production" && config.paymentMode === "direct") {
       return reply.status(503).send({
         error: "DIRECT_MODE_DISABLED",
@@ -93,7 +125,7 @@ export function registerStartJob(
       return reply.status(503).send({
         error: "LANGDOCK_NOT_CONFIGURED",
         message:
-          "LANGDOCK_API_KEY and LANGDOCK_AGENT_ID are required before starting paid jobs.",
+          "LANGDOCK_API_KEY and a Langdock agent id are required before starting paid jobs.",
       });
     }
     const { agentIdentifier, sellerVKey } = resolveAgentDisplayIdentity(config);
@@ -181,6 +213,7 @@ export function registerStartJob(
         unlockTime,
         externalDisputeUnlockTime,
         amounts: config.priceAmounts,
+        agent_slug: routeAgent?.slug,
         continuation_token_hash: continuationTokenHash,
       });
 
@@ -206,6 +239,7 @@ export function registerStartJob(
         unlockTime,
         externalDisputeUnlockTime,
         amounts: config.priceAmounts,
+        agent_slug: routeAgent?.slug,
         continuation_token_hash: continuationTokenHash,
       });
 
@@ -238,5 +272,16 @@ export function registerStartJob(
     };
 
     return reply.status(200).send(resBody);
+  }
+
+  app.post("/start_job", async (request, reply) => {
+    return handleStartJob(request, reply);
   });
+
+  app.post<{ Params: StartJobParams }>(
+    "/agents/:agentSlug/start_job",
+    async (request, reply) => {
+      return handleStartJob(request, reply, request.params.agentSlug);
+    },
+  );
 }

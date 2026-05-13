@@ -3,8 +3,9 @@
  * `GET /availability`: optional custom handler, else returns a fixed healthy JSON body.
  */
 
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import type { BridgeContext } from "./bridgeContext.js";
+import { findAgentProfile, loadConfig } from "../config.js";
 import type { AvailabilityResponseBody } from "../types/masumi.js";
 
 /** Registers the `/availability` route. */
@@ -12,7 +13,28 @@ export function registerAvailability(
   app: FastifyInstance,
   ctx: BridgeContext,
 ): void {
-  app.get("/availability", async (_request, reply) => {
+  async function handleAvailability(
+    reply: FastifyReply,
+    agentSlug?: string,
+  ) {
+    if (agentSlug) {
+      const config = loadConfig();
+      const agent = findAgentProfile(config, agentSlug);
+      if (!agent) {
+        return reply.status(404).send({
+          error: "AGENT_NOT_FOUND",
+          message: `No agent is configured for slug: ${agentSlug}`,
+        });
+      }
+
+      const body: AvailabilityResponseBody = {
+        status: "available",
+        type: "masumi-agent",
+        message: `${agent.name || agent.slug} is ready.`,
+      };
+      return reply.status(200).send(body);
+    }
+
     const custom = ctx.endpointHandler.getAvailabilityHandler();
     if (custom) {
       try {
@@ -30,5 +52,16 @@ export function registerAvailability(
       message: "Langdock–Masumi wrapper service is ready.",
     };
     return reply.status(200).send(body);
+  }
+
+  app.get("/availability", async (_request, reply) => {
+    return handleAvailability(reply);
   });
+
+  app.get<{ Params: { agentSlug: string } }>(
+    "/agents/:agentSlug/availability",
+    async (request, reply) => {
+      return handleAvailability(reply, request.params.agentSlug);
+    },
+  );
 }

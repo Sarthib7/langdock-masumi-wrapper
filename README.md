@@ -14,6 +14,9 @@ It implements:
   `AGENT_IDENTIFIER` once the registration returns one.
 - `POST /start_job`   — registers a sale on the Masumi Payment Service, returns
   `blockchainIdentifier` + payment timings, defers execution until funds are locked.
+- `POST /agents/:slug/start_job` and matching `/status`, `/availability`, and
+  `/input_schema` routes — one deployed wrapper can host multiple registered
+  Langdock/Masumi agents.
 - `GET  /status`      — MIP-003 payload with `input_hash`, `output_hash`, result, timestamps, and HITL prompts when awaiting input.
 - `POST /provide_input` — optional HITL chat continuation for Langdock agents; send follow-up input or `DONE` to finish.
 - `GET  /availability` — health for load balancers / marketplace checks.
@@ -65,6 +68,7 @@ cp .env.example .env
 |-----|---------|
 | `LANGDOCK_API_KEY` | Server-side Langdock API key. Never expose to the browser. |
 | `LANGDOCK_AGENT_ID` | Target Langdock agent ID. |
+| `AGENTS_JSON` | Optional routed agent profiles. Each profile exposes `/agents/<slug>/...` and carries its own Langdock agent id, Masumi agent identifier, pricing, and schema. |
 | `AGENT_IDENTIFIER` | Masumi NFT-backed agent identifier (from the Payment Service registry). |
 | `SELLER_VKEY` | Selling wallet verification key (from the Payment Service admin UI). |
 | `PAYMENT_MODE` | `masumi` (default when URL is set — production) or `direct` (local dev, skips escrow). |
@@ -77,7 +81,7 @@ cp .env.example .env
 | `INPUT_SCHEMA_PATH` / `INPUT_SCHEMA_JSON` | MIP-003 schema served at `/input_schema`. |
 | `REQUIRE_PRODUCTION_CONFIG` | Set `true` to make startup fail until production env is complete. Leave unset/false when the admin still needs to use the locked setup UI. |
 | `SETUP_USERNAME` / `SETUP_PASSWORD_HASH` | Required admin login for the hosted setup UI. Browser registration is disabled. |
-| `SETUP_PASSWORD` | Plaintext fallback for admin login when your deployment secret store is private. Prefer `SETUP_PASSWORD_HASH`. |
+| `SETUP_PASSWORD` | Plaintext admin password accepted when your deployment secret store is private. |
 | `SETUP_ACCESS_TOKEN` | Optional bearer/basic API access token for setup endpoints. Admin username/password remains the browser login. |
 | `SETUP_ENV_PATH` | Optional path where `POST /setup/config` writes persistent env config. Defaults to `.env` in the current working directory. |
 
@@ -122,50 +126,62 @@ are not returned by `GET /setup/config` or the UI status panel. Empty secret
 fields keep their previous value so refreshing status or changing non-secret
 settings does not erase credentials.
 
-Configure the admin login before exposing the page. Prefer a bcrypt hash:
+Configure the admin login before exposing the page. Use either a bcrypt hash:
 
 ```bash
 SETUP_USERNAME="operator"
 SETUP_PASSWORD_HASH="$2b$12$..."
 ```
 
-For local development or a private deployment secret store, plaintext is also
-accepted:
+Or use a plaintext password in your deployment secret store:
 
 ```bash
 SETUP_USERNAME="operator"
-SETUP_PASSWORD="change-me"
+SETUP_PASSWORD="<set-a-private-admin-password>"
 ```
 
 `SETUP_ACCESS_TOKEN` is still accepted as an API bearer token for setup routes,
 but the browser login does not allow public registration.
 
-The setup UI also includes **Agent slots** — up to four registration profiles saved
-in your browser's localStorage. The admin chooses the public agent name,
-description, URL, capability/version, author/contact details, tags, pricing,
-legal links, and optional example outputs. **Register agent** submits the selected
-slot to the Masumi registry and auto-saves the profile afterwards.
+The setup UI also includes **Agent slots**. Each slot can be saved into
+`AGENTS_JSON`, which exposes a separate route namespace:
+`/agents/<slug>/availability`, `/agents/<slug>/input_schema`,
+`/agents/<slug>/start_job`, and `/agents/<slug>/status`. The admin chooses the
+public agent name, description, route slug, Langdock agent id, capability/version,
+author/contact details, tags, pricing, legal links, and optional example outputs.
+**Register agent** submits the selected slot to the Masumi registry and saves the
+returned `agentIdentifier` back into that slot.
+
+When editing env directly, keep `AGENTS_JSON` as a JSON array. The legacy
+`/start_job` endpoint uses `LANGDOCK_AGENT_ID` and `AGENT_IDENTIFIER`; routed
+agent endpoints use their matching profile instead:
+
+```env
+AGENTS_JSON=[{"slug":"research","name":"Research Agent","description":"Answers research tasks.","apiBaseUrl":"https://wrapper.example.com/agents/research","langdockAgentId":"LANGDOCK_AGENT_ID_HERE","agentIdentifier":"MASUMI_AGENT_IDENTIFIER_AFTER_REGISTRATION","priceAmounts":[{"amount":"1000000","unit":"PREPROD_TUSDM_OR_MAINNET_USDCX_ASSET_ID"}]}]
+```
 
 #### Credential guide
 
 | Field | What it is for | Where to get it |
 |-------|----------------|-----------------|
-| `SETUP_USERNAME` / `SETUP_PASSWORD_HASH` | Admin login for the setup UI. This is not provided by a vendor; generate it yourself. | Store them in your deployment variables. `SETUP_PASSWORD` is supported as a plaintext fallback, but a bcrypt hash is preferred. See [Railway variables](https://docs.railway.com/variables). |
+| `SETUP_USERNAME` / `SETUP_PASSWORD_HASH` | Admin login for the setup UI. This is not provided by a vendor; generate it yourself. | Store them in your deployment variables. `SETUP_PASSWORD` is also supported. See [Railway variables](https://docs.railway.com/variables). |
 | `SETUP_ACCESS_TOKEN` | Optional API bearer token for setup endpoints. | Run `openssl rand -hex 32`, then set it in deployment variables. |
 | `LANGDOCK_API_KEY` | Server-side key used by this wrapper to call Langdock. | In Langdock workspace settings, create an API key, then share your agent with that key. See [Langdock: Sharing Agents with API Keys](https://docs.langdock.com/api-endpoints/agent/agent-api-guide). |
 | `LANGDOCK_AGENT_ID` | The Langdock agent this wrapper calls. | Open the agent in Langdock and copy the ID from the URL, e.g. `https://app.langdock.com/agents/AGENT_ID/edit`. See the same [Langdock guide](https://docs.langdock.com/api-endpoints/agent/agent-api-guide). |
+| `AGENTS_JSON` | Multi-agent route profiles for one wrapper deployment. | Usually written by the setup UI. Each profile needs `slug`, `langdockAgentId`, and, after registry confirmation, `agentIdentifier`. |
 | `PAYMENT_SERVICE_URL` | Masumi Payment Service or Masumi SaaS API base URL used for payments and registry calls. | Use a URL ending in `/api/v1` for a direct payment node or `/pay/api/v1` for Masumi SaaS. See [Masumi API reference](https://docs.masumi.network/api-reference). |
 | `PAYMENT_API_KEY` | API key for the Masumi Payment Service/SaaS. | Create or copy an API key from your Payment Service/SaaS admin surface. API calls authenticate with `token` or `x-api-key`. See [Payment Service API keys](https://docs.masumi.network/api-reference/payment-service/get-api-key). |
 | `SELLER_VKEY` | Selling wallet verification key used when registering the agent and taking payment. | From the funded selling wallet in your Masumi Payment Service/admin setup. |
-| `AGENT_IDENTIFIER` | On-chain Masumi registry identifier for this agent. | Generated by the setup UI's **Register agent** flow or registry API. Use **Refresh registry** until it appears. See [Sokosumi listing guide](https://docs.masumi.network/documentation/how-to-guides/list-agent-on-sokosumi). |
+| `AGENT_IDENTIFIER` | On-chain Masumi registry identifier for the legacy global endpoint. | Generated by the setup UI's **Register agent** flow or registry API. For routed agents, this is stored per profile in `AGENTS_JSON`. Use **Refresh registry** until it appears. See [Sokosumi listing guide](https://docs.masumi.network/documentation/how-to-guides/list-agent-on-sokosumi). |
 | `NETWORK` | Chooses Cardano `Preprod` or `Mainnet`. | Start with `Preprod`; switch to `Mainnet` only after end-to-end tests pass. |
 
 The setup UI can also submit an on-chain registry request through the configured
 Payment Service. Registration requires a funded selling wallet and uses
 `POST {PAYMENT_SERVICE_URL}/registry/`. Preprod should be used first; on-chain
 confirmation can take several minutes. Once the registry response includes an
-`agentIdentifier`, the helper saves it to `.env` so `/start_job` can register
-paid jobs with that identity. Sokosumi discovery depends on the registry NFT
+`agentIdentifier`, the helper saves it to `.env`: the global registration writes
+`AGENT_IDENTIFIER`, and a selected agent slot writes that profile's
+`AGENTS_JSON[].agentIdentifier`. Sokosumi discovery depends on the registry NFT
 being confirmed, the agent URL being public and healthy, and pricing using the
 expected settlement token:
 
@@ -205,6 +221,13 @@ curl -s -X POST http://localhost:3000/start_job \
   -d '{"identifier_from_purchaser":"abc123def4567890","input_data":[{"key":"text","value":"Hello"}]}'
 
 curl -s "http://localhost:3000/status?job_id=JOB_UUID"
+
+# Routed agent profiles use the same MIP-003 payload shape.
+curl -s -X POST http://localhost:3000/agents/research/start_job \
+  -H "Content-Type: application/json" \
+  -d '{"identifier_from_purchaser":"abc123def4567890","input_data":[{"key":"text","value":"Hello"}]}'
+
+curl -s "http://localhost:3000/agents/research/status?job_id=JOB_UUID"
 
 # HITL chat mode only: continue a job that reports status=awaiting_input.
 # Use the continuationToken returned by /start_job.

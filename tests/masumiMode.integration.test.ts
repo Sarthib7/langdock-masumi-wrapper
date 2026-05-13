@@ -43,6 +43,7 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
     process.env.PAYMENT_POLL_INTERVAL_MS = "10";
     process.env.PAYMENT_POLL_TIMEOUT_MS = "2000";
     process.env.HITL_CHAT_MODE = "false";
+    delete process.env.AGENTS_JSON;
   });
 
   afterEach(() => {
@@ -59,6 +60,7 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
     delete process.env.PAYMENT_POLL_INTERVAL_MS;
     delete process.env.PAYMENT_POLL_TIMEOUT_MS;
     delete process.env.HITL_CHAT_MODE;
+    delete process.env.AGENTS_JSON;
   });
 
   it("registers sale, polls, runs handler, submits hash", async () => {
@@ -158,7 +160,7 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
       },
     });
 
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode, res.body).toBe(200);
     const json = res.json() as {
       blockchainIdentifier: string;
       status: string;
@@ -181,6 +183,134 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
     const final = getJob(jobId);
     expect(final?.status).toBe("completed");
     expect(final?.output_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(submitResultCalls).toBe(1);
+
+    await app.close();
+  });
+
+  it("uses per-agent Masumi identity and Langdock agent for /agents/:slug/start_job", async () => {
+    delete process.env.AGENT_IDENTIFIER;
+    delete process.env.LANGDOCK_AGENT_ID;
+    process.env.AGENTS_JSON = JSON.stringify([
+      {
+        slug: "paid-agent",
+        name: "Paid Agent",
+        description: "Paid multi-agent route",
+        langdockAgentId: "ld-paid-agent",
+        agentIdentifier: "agent-paid-123",
+        priceAmounts: [{ amount: "2000000", unit: "unit-test" }],
+      },
+    ]);
+
+    let registerCalls = 0;
+    let submitResultCalls = 0;
+    const blockchainIdentifier = "block_paid_123";
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async (
+          url: string,
+          init?: {
+            method?: string;
+            body?: string;
+            headers?: Record<string, string>;
+          },
+        ) => {
+          const method = init?.method ?? "GET";
+          const u = typeof url === "string" ? url : String(url);
+
+          if (u.endsWith("/api/v1/payment") && method === "POST") {
+            registerCalls += 1;
+            const body = JSON.parse(init!.body!);
+            expect(body.agentIdentifier).toBe("agent-paid-123");
+            expect(body.RequestedFunds).toEqual([{ amount: "2000000", unit: "unit-test" }]);
+            return {
+              ok: true,
+              status: 200,
+              text: async () =>
+                JSON.stringify({
+                  data: {
+                    blockchainIdentifier,
+                    payByTime: "1800000000",
+                    submitResultTime: "1800001000",
+                    unlockTime: "1800002000",
+                    externalDisputeUnlockTime: "1800003000",
+                  },
+                }),
+            };
+          }
+
+          if (
+            u.endsWith("/api/v1/payment/resolve-blockchain-identifier") &&
+            method === "POST"
+          ) {
+            return {
+              ok: true,
+              status: 200,
+              text: async () =>
+                JSON.stringify({
+                  data: { blockchainIdentifier, onChainState: "FundsLocked" },
+                }),
+            };
+          }
+
+          if (u.endsWith("/api/v1/payment/submit-result") && method === "POST") {
+            submitResultCalls += 1;
+            return {
+              ok: true,
+              status: 200,
+              text: async () => JSON.stringify({ data: { ok: true } }),
+            };
+          }
+
+          if (u.endsWith("/agent/v1/chat/completions") && method === "POST") {
+            const body = JSON.parse(init!.body!);
+            expect(body.agentId).toBe("ld-paid-agent");
+            return {
+              ok: true,
+              status: 200,
+              text: async () =>
+                JSON.stringify({
+                  messages: [
+                    {
+                      id: "m1",
+                      role: "assistant",
+                      parts: [{ type: "text", text: "paid agent result" }],
+                    },
+                  ],
+                }),
+            };
+          }
+
+          throw new Error(`Unexpected fetch: ${method} ${u}`);
+        },
+      ) as unknown as typeof fetch,
+    );
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/agents/paid-agent/start_job",
+      payload: {
+        identifier_from_purchaser: "aabbccddeeff0011",
+        input_data: [{ key: "text", value: "hello" }],
+      },
+    });
+
+    expect(res.statusCode, res.body).toBe(200);
+    const json = res.json() as {
+      id: string;
+      agentIdentifier: string;
+      amounts: Array<{ amount: string; unit: string }>;
+    };
+    expect(json.agentIdentifier).toBe("agent-paid-123");
+    expect(json.amounts).toEqual([{ amount: "2000000", unit: "unit-test" }]);
+    expect(registerCalls).toBe(1);
+
+    const { getJob } = await import("../src/services/jobs.js");
+    await waitUntil(() => getJob(json.id)?.status === "completed");
+    expect(getJob(json.id)?.result).toBe("paid agent result");
     expect(submitResultCalls).toBe(1);
 
     await app.close();

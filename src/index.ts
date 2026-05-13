@@ -15,8 +15,12 @@ export {
   type BuildAppOptions,
 } from "./app.js";
 export {
+  configForAgentProfile,
+  findAgentProfile,
   loadConfig,
+  normalizeAgentSlug,
   resolveAgentDisplayIdentity,
+  type AgentProfileConfig,
   type AppConfig,
   type InputSchemaField,
   type MasumiNetwork,

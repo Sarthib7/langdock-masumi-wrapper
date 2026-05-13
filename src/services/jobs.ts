@@ -21,6 +21,7 @@ export type NewJobInput = {
   unlockTime: number;
   externalDisputeUnlockTime: number;
   amounts: Array<{ amount: string; unit: string }>;
+  agent_slug?: string;
   continuation_token_hash?: string;
 };
 
