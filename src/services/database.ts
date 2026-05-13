@@ -16,10 +16,12 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 let db: SqlJsDatabase | undefined;
 let dbPathValue: string;
+const requireFromHere = createRequire(import.meta.url);
 
 function dbPath(): string {
   return process.env.DB_PATH || path.join(process.cwd(), "data", "auth.db");
@@ -35,7 +37,7 @@ async function loadDb(): Promise<SqlJsDatabase> {
     locateFile: (file: string) => {
       // Resolve WASM binary relative to the installed sql.js package
       try {
-        return require.resolve(`sql.js/dist/${file}`);
+        return requireFromHere.resolve(`sql.js/dist/${file}`);
       } catch {
         return file;
       }
