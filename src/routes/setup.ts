@@ -544,9 +544,7 @@ function setupHtml(user?: AuthenticatedUser | null): string {
     ? `<div class="user-badge">
         <span class="user-avatar" aria-hidden="true">${escSetupHtml((user.displayName || user.username).charAt(0).toUpperCase())}</span>
         <span class="user-name">${escSetupHtml(user.displayName || user.username)}</span>
-        <form action="/auth/logout" method="post" style="display:inline">
-          <button type="submit" class="logout-btn secondary">Sign out</button>
-        </form>
+        <button type="button" id="logoutButton" class="logout-btn secondary">Sign out</button>
       </div>`
     : '';
   return String.raw`<!doctype html>
@@ -558,30 +556,36 @@ function setupHtml(user?: AuthenticatedUser | null): string {
   <style>
     :root {
       color-scheme: light dark;
-      --bg: #f7f7f5;
+      --bg: #f6f7f4;
       --panel: #ffffff;
+      --panel-soft: #f1f3ef;
       --text: #1c1c1a;
-      --muted: #5f625d;
-      --border: #d8dad4;
+      --muted: #5b605a;
+      --border: #d9ddd5;
       --accent: #0f6a5f;
+      --accent-soft: #e4f4f1;
       --accent-text: #ffffff;
       --danger: #a63636;
       --ok: #1f7a4d;
       --warn: #8a5d00;
+      --shadow: 0 1px 2px rgba(20, 24, 20, 0.05);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #151512;
-        --panel: #20201c;
+        --bg: #131512;
+        --panel: #1d1f1b;
+        --panel-soft: #252821;
         --text: #eeeeea;
         --muted: #b9bbb3;
         --border: #3a3b35;
         --accent: #38b7a6;
+        --accent-soft: #153b35;
         --accent-text: #08221e;
         --danger: #f07d7d;
         --ok: #74d59f;
         --warn: #e0b54b;
+        --shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
       }
     }
     * { box-sizing: border-box; }
@@ -591,38 +595,174 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       background: var(--bg);
       color: var(--text);
       line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
     }
-    main {
-      width: min(1120px, calc(100% - 32px));
+    .app-shell {
+      width: min(1280px, calc(100% - 32px));
       margin: 0 auto;
-      padding: 32px 0 48px;
+      padding: 28px 0 48px;
     }
-    header {
+    .topbar {
       display: flex;
       justify-content: space-between;
-      gap: 20px;
-      align-items: flex-start;
-      margin-bottom: 24px;
+      gap: 24px;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+    .brand-mark {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--accent);
+      color: var(--accent-text);
+      font-weight: 850;
+      box-shadow: var(--shadow);
+      flex: 0 0 auto;
     }
     h1 {
       margin: 0;
-      font-size: clamp(28px, 4vw, 44px);
-      line-height: 1.05;
+      font-size: clamp(24px, 3vw, 34px);
+      line-height: 1.12;
       letter-spacing: 0;
     }
     h2, h3, p { margin-top: 0; }
+    h2 { margin-bottom: 6px; font-size: 20px; }
+    h3 { margin-bottom: 6px; font-size: 15px; }
     p { color: var(--muted); }
-    .grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
-      gap: 16px;
-      align-items: start;
+    .subtitle {
+      margin: 4px 0 0;
+      max-width: 68ch;
+      font-size: 14px;
     }
-    section, aside {
+    .top-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .metric {
+      min-height: 92px;
       border: 1px solid var(--border);
       background: var(--panel);
       border-radius: 8px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+    }
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .metric strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+    .metric small {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .workspace {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr) 360px;
+      gap: 14px;
+      align-items: start;
+    }
+    .section-nav,
+    .content-panel,
+    .status-panel {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+    .section-nav {
+      position: sticky;
+      top: 16px;
+      display: grid;
+      gap: 6px;
+      padding: 8px;
+    }
+    .nav-item {
+      width: 100%;
+      min-height: 48px;
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
+      font-size: 14px;
+      font-weight: 750;
+    }
+    .nav-item span {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .nav-item[aria-selected="true"] {
+      background: var(--accent-soft);
+      color: var(--text);
+      border-color: color-mix(in srgb, var(--accent), transparent 65%);
+    }
+    .nav-item[aria-selected="true"] span {
+      background: var(--accent);
+      color: var(--accent-text);
+    }
+    .content-panel,
+    .status-panel {
       padding: 20px;
+    }
+    .panel-section {
+      display: grid;
+      gap: 18px;
+    }
+    .panel-section[hidden] {
+      display: none;
+    }
+    .panel-heading {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 14px;
+    }
+    .panel-heading p {
+      margin-bottom: 0;
+      max-width: 72ch;
+      font-size: 14px;
     }
     form, fieldset, .stack {
       display: grid;
@@ -635,8 +775,9 @@ function setupHtml(user?: AuthenticatedUser | null): string {
     }
     legend {
       width: 100%;
+      padding: 0 0 4px;
       font-weight: 700;
-      margin-bottom: 4px;
+      border-bottom: 1px solid var(--border);
     }
     label {
       display: grid;
@@ -652,9 +793,14 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       width: 100%;
       min-height: 44px;
       border: 1px solid var(--border);
-      background: transparent;
+      background: color-mix(in srgb, var(--panel), var(--bg) 20%);
       color: var(--text);
       padding: 10px 12px;
+      transition: border-color 120ms ease-out, box-shadow 120ms ease-out, background-color 120ms ease-out;
+    }
+    input::placeholder,
+    textarea::placeholder {
+      color: color-mix(in srgb, var(--muted), transparent 25%);
     }
     textarea {
       min-height: 92px;
@@ -663,7 +809,7 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       font-size: 13px;
     }
     input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible {
-      outline: 3px solid color-mix(in srgb, var(--accent), transparent 35%);
+      outline: 3px solid color-mix(in srgb, var(--accent), transparent 45%);
       outline-offset: 2px;
     }
     button {
@@ -674,7 +820,19 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       color: var(--accent-text);
       font-weight: 700;
       cursor: pointer;
+      transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out, transform 80ms ease-out;
     }
+    @media (hover: hover) {
+      button:hover {
+        transform: translateY(-1px);
+      }
+      button.secondary:hover,
+      .slot-card:hover,
+      .nav-item:hover {
+        border-color: color-mix(in srgb, var(--accent), transparent 55%);
+      }
+    }
+    button:active { transform: translateY(0); }
     button.secondary {
       background: transparent;
       color: var(--text);
@@ -687,6 +845,11 @@ function setupHtml(user?: AuthenticatedUser | null): string {
     .row {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .three-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 12px;
     }
     .segmented {
@@ -723,16 +886,22 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       font-size: 12px;
       font-weight: 500;
     }
+    .notice {
+      display: grid;
+      gap: 8px;
+      border: 1px solid color-mix(in srgb, var(--warn), transparent 55%);
+      background: color-mix(in srgb, var(--warn), transparent 90%);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 13px;
+    }
+    .notice strong { color: var(--text); }
     .actions {
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
       align-items: center;
-    }
-    .auth-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
+      padding-top: 2px;
     }
     .hidden { display: none !important; }
     .agent-slots {
@@ -746,7 +915,7 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       gap: 4px;
       padding: 10px;
       text-align: left;
-      background: transparent;
+      background: color-mix(in srgb, var(--panel), var(--bg) 18%);
       color: var(--text);
       border-color: var(--border);
       font-weight: 650;
@@ -765,6 +934,7 @@ function setupHtml(user?: AuthenticatedUser | null): string {
     .status {
       display: inline-flex;
       align-items: center;
+      justify-content: center;
       min-height: 32px;
       border-radius: 999px;
       border: 1px solid var(--border);
@@ -775,42 +945,33 @@ function setupHtml(user?: AuthenticatedUser | null): string {
     }
     .status.ready { color: var(--ok); }
     .status.not-ready { color: var(--danger); }
-    .banner {
-      border-left: 4px solid var(--warn);
-      padding: 10px 12px;
-      background: color-mix(in srgb, var(--warn), transparent 88%);
-      border-radius: 6px;
-      color: var(--text);
-      font-size: 14px;
-    }
-    .help {
+    .setup-guide {
       display: grid;
       gap: 12px;
-      margin-bottom: 16px;
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 16px;
-      background: color-mix(in srgb, var(--panel), var(--bg) 35%);
+      padding: 14px;
+      background: var(--panel-soft);
     }
-    .help h3 {
+    .setup-guide h3 {
       margin: 0;
       font-size: 16px;
     }
-    .help dl {
+    .setup-guide dl {
       display: grid;
       gap: 10px;
       margin: 0;
     }
-    .help dt {
+    .setup-guide dt {
       font-size: 13px;
       font-weight: 800;
     }
-    .help dd {
+    .setup-guide dd {
       margin: 2px 0 0;
       color: var(--muted);
       font-size: 13px;
     }
-    .help a {
+    .setup-guide a {
       color: var(--accent);
       font-weight: 750;
       text-decoration-thickness: 1px;
@@ -830,6 +991,14 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       font-size: 14px;
       font-weight: 650;
     }
+    .message {
+      min-height: 24px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 650;
+    }
+    .message.error { color: var(--danger); }
+    .message.success { color: var(--ok); }
     pre {
       overflow: auto;
       min-height: 96px;
@@ -840,12 +1009,60 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       background: color-mix(in srgb, var(--panel), var(--bg) 45%);
       font-size: 12px;
       line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    details.output-block {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--panel), var(--bg) 18%);
+      overflow: hidden;
+    }
+    details.output-block summary {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      padding: 10px 12px;
+      cursor: pointer;
+      font-weight: 750;
+    }
+    details.output-block pre {
+      margin: 0;
+      border: 0;
+      border-top: 1px solid var(--border);
+      border-radius: 0;
+      background: transparent;
+    }
+    details.output-block summary:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--accent), transparent 45%);
+      outline-offset: -3px;
     }
     ul {
       padding-left: 20px;
       color: var(--muted);
     }
     li + li { margin-top: 6px; }
+    .issue-list {
+      margin: 10px 0 0;
+      padding-left: 0;
+      list-style: none;
+    }
+    .issue-list li {
+      border-left: 3px solid var(--warn);
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--warn), transparent 91%);
+      color: var(--text);
+      font-size: 13px;
+    }
+    .issue-list li.danger {
+      border-left-color: var(--danger);
+      background: color-mix(in srgb, var(--danger), transparent 91%);
+    }
+    .issue-list li.ok {
+      border-left-color: var(--ok);
+      background: color-mix(in srgb, var(--ok), transparent 92%);
+    }
     .sr-only {
       position: absolute;
       width: 1px;
@@ -861,6 +1078,10 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       display: flex;
       align-items: center;
       gap: 10px;
+      padding: 6px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel);
     }
     .user-avatar {
       width: 32px;
@@ -883,48 +1104,122 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       padding: 6px 10px;
       min-height: 32px;
     }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+      }
+    }
+    @media (max-width: 1120px) {
+      .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .workspace {
+        grid-template-columns: minmax(0, 1fr) 340px;
+      }
+      .section-nav {
+        position: static;
+        grid-column: 1 / -1;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
     @media (max-width: 820px) {
-      main { width: min(100% - 24px, 720px); padding-top: 20px; }
-      header, .grid, .row, .auth-grid, .agent-slots { grid-template-columns: 1fr; display: grid; }
+      .app-shell { width: min(100% - 24px, 720px); padding-top: 18px; }
+      .topbar, .workspace, .row, .three-row, .agent-slots {
+        grid-template-columns: 1fr;
+        display: grid;
+      }
+      .top-actions { justify-content: flex-start; }
+      .section-nav { grid-template-columns: 1fr; }
+      .summary-grid { grid-template-columns: 1fr; }
+      .panel-heading { display: grid; }
+    }
+    @media (max-width: 480px) {
+      .app-shell { width: min(100% - 20px, 420px); }
+      .brand { align-items: flex-start; }
+      .brand-mark { width: 40px; height: 40px; }
+      .content-panel, .status-panel { padding: 16px; }
+      .metric { min-height: auto; }
     }
   </style>
 </head>
 <body>
-  <main>
-    <header>
-      <div>
-        <h1>Langdock Masumi Setup</h1>
-        <p>Configure this running wrapper with your Langdock API and Masumi payment credentials.</p>
-      </div>
-      <span id="readyBadge" class="status">Checking</span>
-    </header>
-    ${userBadge}
-
-    <div class="grid">
-      <section aria-labelledby="configTitle">
-        <h2 id="configTitle">Runtime config</h2>
-        <p class="banner">Credentials are saved to <code>.env</code>, applied to this process, and never shown again. Configure <code>SETUP_USERNAME</code> plus <code>SETUP_PASSWORD_HASH</code> before exposing this page publicly.</p>
-        <div class="help" aria-labelledby="credentialGuideTitle">
-          <h3 id="credentialGuideTitle">Credential guide</h3>
-          <dl>
-            <div>
-              <dt>Admin login</dt>
-              <dd>Protects this setup page. Set <code>SETUP_USERNAME</code> and preferably a bcrypt <code>SETUP_PASSWORD_HASH</code>; <code>SETUP_PASSWORD</code> is accepted when your deployment secret store is private. <a href="https://docs.railway.com/variables" target="_blank" rel="noreferrer">Railway variables</a></dd>
-            </div>
-            <div>
-              <dt>Langdock API key and Agent ID</dt>
-              <dd>Create an API key in Langdock workspace settings, share the agent with that API key, then copy the agent ID from the agent URL. <a href="https://docs.langdock.com/api-endpoints/agent/agent-api-guide" target="_blank" rel="noreferrer">Langdock guide</a></dd>
-            </div>
-            <div>
-              <dt>Payment Service URL and API key</dt>
-              <dd>Use a Masumi Payment Service base URL ending in <code>/api/v1</code> or Masumi SaaS ending in <code>/pay/api/v1</code>. API keys authenticate with <code>token</code> or <code>x-api-key</code>. <a href="https://docs.masumi.network/api-reference" target="_blank" rel="noreferrer">Masumi API reference</a></dd>
-            </div>
-            <div>
-              <dt>Seller VKey and Agent Identifier</dt>
-              <dd>The seller VKey identifies the funded selling wallet. The agent identifier is created by Masumi registry registration; use Register agent, then Refresh registry until it appears. <a href="https://docs.masumi.network/documentation/how-to-guides/list-agent-on-sokosumi" target="_blank" rel="noreferrer">Sokosumi listing guide</a></dd>
-            </div>
-          </dl>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">LM</div>
+        <div>
+          <h1>Langdock Masumi Setup</h1>
+          <p class="subtitle">Configure Langdock execution, Masumi payments, registry metadata, and live job testing from one operator console.</p>
         </div>
+      </div>
+      <div class="top-actions">
+        ${userBadge}
+        <button id="refreshStateTop" type="button" class="secondary">Refresh</button>
+      </div>
+    </header>
+
+    <section class="summary-grid" aria-label="Wrapper summary">
+      <div class="metric">
+        <span>Readiness</span>
+        <strong><span id="readyBadge" class="status">Checking</span></strong>
+        <small id="summaryIssues">Loading checks</small>
+      </div>
+      <div class="metric">
+        <span>Payment</span>
+        <strong id="summaryMode">Masumi</strong>
+        <small id="summaryNetwork">Preprod</small>
+      </div>
+      <div class="metric">
+        <span>Registry</span>
+        <strong id="summaryRegistry">Not loaded</strong>
+        <small>Agent name and listing state</small>
+      </div>
+      <div class="metric">
+        <span>Secrets</span>
+        <strong id="summarySecrets">Checking</strong>
+        <small>Keys stay redacted after save</small>
+      </div>
+    </section>
+
+    <div class="workspace">
+      <nav class="section-nav" aria-label="Setup workflow">
+        <button class="nav-item" type="button" data-panel-target="configPanel" aria-controls="configPanel" aria-selected="true"><span>01</span> Configure</button>
+        <button class="nav-item" type="button" data-panel-target="registryPanel" aria-controls="registryPanel" aria-selected="false"><span>02</span> Registry</button>
+        <button class="nav-item" type="button" data-panel-target="testPanel" aria-controls="testPanel" aria-selected="false"><span>03</span> Test</button>
+      </nav>
+
+      <section class="content-panel" aria-label="Setup panels">
+        <section id="configPanel" class="panel-section" aria-labelledby="configTitle">
+          <div class="panel-heading">
+            <div>
+              <h2 id="configTitle">Runtime config</h2>
+              <p>Save runtime values to <code>.env</code> and apply them to the running process. Existing secret values stay redacted and can be left blank.</p>
+            </div>
+          </div>
+          <div class="notice">
+            <strong>Production safety:</strong>
+            <span>Use <code>SETUP_PASSWORD_HASH</code> instead of plaintext <code>SETUP_PASSWORD</code> when the deployment is public. Secrets entered here are not echoed back by the dashboard.</span>
+          </div>
+          <details class="setup-guide">
+            <summary>Credential guide</summary>
+            <dl>
+              <div>
+                <dt>Admin login</dt>
+                <dd>Protects this setup page. Set <code>SETUP_USERNAME</code> and preferably a bcrypt <code>SETUP_PASSWORD_HASH</code>. <a href="https://docs.railway.com/variables" target="_blank" rel="noreferrer">Railway variables</a></dd>
+              </div>
+              <div>
+                <dt>Langdock API key and Agent ID</dt>
+                <dd>Create an API key in Langdock workspace settings, share the agent with that API key, then copy the agent ID from the agent URL. <a href="https://docs.langdock.com/api-endpoints/agent/agent-api-guide" target="_blank" rel="noreferrer">Langdock guide</a></dd>
+              </div>
+              <div>
+                <dt>Payment Service URL and API key</dt>
+                <dd>Use a Masumi Payment Service base URL ending in <code>/api/v1</code> or Masumi SaaS ending in <code>/pay/api/v1</code>. <a href="https://docs.masumi.network/api-reference" target="_blank" rel="noreferrer">Masumi API reference</a></dd>
+              </div>
+              <div>
+                <dt>Seller VKey and Agent Identifier</dt>
+                <dd>The seller VKey identifies the funded selling wallet. The agent identifier is created by Masumi registry registration; use Register agent, then Refresh registry until it appears. <a href="https://docs.masumi.network/documentation/how-to-guides/list-agent-on-sokosumi" target="_blank" rel="noreferrer">Sokosumi listing guide</a></dd>
+              </div>
+            </dl>
+          </details>
           <form id="configForm" novalidate>
           <fieldset>
             <legend>Langdock</legend>
@@ -936,11 +1231,13 @@ function setupHtml(user?: AuthenticatedUser | null): string {
             <div class="row">
               <label>
                 API key
-                <input name="langdockApiKey" type="password" autocomplete="new-password" spellcheck="false" required />
+                <input name="langdockApiKey" type="password" autocomplete="new-password" spellcheck="false" />
+                <span class="hint">Leave blank to keep the saved key.</span>
               </label>
               <label>
                 Agent ID
-                <input name="langdockAgentId" type="text" autocomplete="off" spellcheck="false" required />
+                <input name="langdockAgentId" type="text" autocomplete="off" spellcheck="false" />
+                <span class="hint">Leave blank to keep the saved agent ID.</span>
               </label>
             </div>
           </fieldset>
@@ -972,6 +1269,7 @@ function setupHtml(user?: AuthenticatedUser | null): string {
               <label>
                 Payment API key
                 <input name="paymentApiKey" type="password" autocomplete="new-password" spellcheck="false" />
+                <span class="hint">Leave blank to keep the saved payment key.</span>
               </label>
               <label>
                 Auth header
@@ -986,10 +1284,12 @@ function setupHtml(user?: AuthenticatedUser | null): string {
               <label>
                 Agent identifier
                 <input name="agentIdentifier" type="text" autocomplete="off" spellcheck="false" />
+                <span class="hint">Usually filled after registry registration.</span>
               </label>
               <label>
                 Seller VKey
                 <input name="sellerVKey" type="password" autocomplete="new-password" spellcheck="false" />
+                <span class="hint">Leave blank to keep the saved seller key.</span>
               </label>
             </div>
             <label>
@@ -1002,46 +1302,57 @@ function setupHtml(user?: AuthenticatedUser | null): string {
           <div class="actions">
             <button id="saveConfig" type="submit">Apply config</button>
             <button id="refreshState" class="secondary" type="button">Refresh status</button>
-            <span id="configMessage" role="status" aria-live="polite"></span>
+            <span id="configMessage" class="message" role="status" aria-live="polite"></span>
           </div>
         </form>
-      </section>
+        </section>
 
-      <aside class="stack" aria-labelledby="statusTitle">
-        <div>
-          <h2 id="statusTitle">Readiness</h2>
-          <p id="emptyState">No status loaded yet.</p>
-          <ul id="issues"></ul>
-        </div>
-        <pre id="stateOutput" aria-label="Redacted configuration state">{}</pre>
-
-        <div class="stack" aria-labelledby="agentSlotsTitle">
-          <div>
-            <h3 id="agentSlotsTitle">Agent slots</h3>
-            <p class="hint">Save up to four registration profiles locally in this browser, then register each one.</p>
+        <section id="registryPanel" class="panel-section" aria-labelledby="registryTitle" hidden>
+          <div class="panel-heading">
+            <div>
+              <h2 id="registryTitle">Masumi registry</h2>
+              <p>Prepare the public listing metadata your users will see. Agent profiles are saved locally in this browser so you can manage multiple listings.</p>
+            </div>
           </div>
-          <div id="agentSlots" class="agent-slots" role="list" aria-label="Agent registration slots"></div>
-          <div class="actions">
-            <button id="saveAgentSlot" class="secondary" type="button">Save current slot</button>
-            <button id="clearAgentSlot" class="secondary" type="button">Clear slot</button>
+          <div class="stack" aria-labelledby="agentSlotsTitle">
+            <div>
+              <h3 id="agentSlotsTitle">Agent slots</h3>
+              <p class="hint">Save up to four registration profiles locally, then register the selected profile when its metadata is ready.</p>
+            </div>
+            <div id="agentSlots" class="agent-slots" role="list" aria-label="Agent registration slots"></div>
+            <div class="actions">
+              <button id="saveAgentSlot" class="secondary" type="button">Save current slot</button>
+              <button id="clearAgentSlot" class="secondary" type="button">Clear slot</button>
+            </div>
           </div>
-        </div>
 
-        <form id="registryForm" class="stack">
-          <h3>Register on Masumi</h3>
+          <form id="registryForm" class="stack" novalidate>
+          <fieldset>
+            <legend>Public listing</legend>
           <label>
             Public agent URL
             <input name="agentApiBaseUrl" type="url" inputmode="url" autocomplete="url" placeholder="https://your-agent.example.com" />
             <span class="hint">Must be public and serve /availability, /input_schema, /start_job, and /status.</span>
           </label>
-          <label>
-            Agent name
-            <input name="agentName" type="text" autocomplete="off" maxlength="250" />
-          </label>
+          <div class="row">
+            <label>
+              Agent name
+              <input name="agentName" type="text" autocomplete="off" maxlength="250" />
+            </label>
+            <label>
+              Tags
+              <input name="tags" type="text" autocomplete="off" value="langdock,masumi" />
+              <span class="hint">Comma-separated, 1-15 tags.</span>
+            </label>
+          </div>
           <label>
             Description
             <textarea name="agentDescription" maxlength="250" placeholder="What this agent does"></textarea>
           </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Capability and pricing</legend>
           <div class="row">
             <label>
               Capability
@@ -1063,11 +1374,10 @@ function setupHtml(user?: AuthenticatedUser | null): string {
               <input name="pricingUnit" type="text" autocomplete="off" spellcheck="false" />
             </label>
           </div>
-          <label>
-            Tags
-            <input name="tags" type="text" autocomplete="off" value="langdock,masumi" />
-            <span class="hint">Comma-separated, 1-15 tags.</span>
-          </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Author</legend>
           <div class="row">
             <label>
               Author name
@@ -1086,6 +1396,10 @@ function setupHtml(user?: AuthenticatedUser | null): string {
             Organization
             <input name="authorOrganization" type="text" autocomplete="organization" />
           </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Examples and legal</legend>
           <label>
             Example outputs
             <textarea name="exampleOutputs" spellcheck="false" placeholder='[{"name":"Sample report","url":"https://example.com/report.pdf","mimeType":"application/pdf"}]'></textarea>
@@ -1105,16 +1419,27 @@ function setupHtml(user?: AuthenticatedUser | null): string {
             Legal notes
             <textarea name="legalOther" spellcheck="false"></textarea>
           </label>
+          </fieldset>
           <div class="actions">
             <button id="registerAgent" type="submit">Register agent</button>
             <button id="refreshRegistry" class="secondary" type="button">Refresh registry</button>
-            <span id="registryMessage" role="status" aria-live="polite"></span>
+            <span id="registryMessage" class="message" role="status" aria-live="polite"></span>
           </div>
         </form>
-        <pre id="registryOutput" aria-label="Registry response">Register or refresh to see registry status.</pre>
+        <details class="output-block">
+          <summary>Registry response</summary>
+          <pre id="registryOutput" aria-label="Registry response">Register or refresh to see registry status.</pre>
+        </details>
+        </section>
 
-        <form id="startJobForm" class="stack">
-          <h3>Call /start_job</h3>
+        <section id="testPanel" class="panel-section" aria-labelledby="testTitle" hidden>
+          <div class="panel-heading">
+            <div>
+              <h2 id="testTitle">Test execution</h2>
+              <p>Call Langdock directly or submit the wrapper's <code>/start_job</code> endpoint using the current runtime configuration.</p>
+            </div>
+          </div>
+        <form id="startJobForm" class="stack" novalidate>
           <label>
             Identifier from purchaser
             <input name="identifier_from_purchaser" type="text" autocomplete="off" spellcheck="false" placeholder="ab12cd34ef56ab" />
@@ -1127,10 +1452,26 @@ function setupHtml(user?: AuthenticatedUser | null): string {
           <div class="actions">
             <button id="testLangdock" class="secondary" type="button">Test Langdock</button>
             <button id="runJob" type="submit">Run job</button>
-            <span id="jobMessage" role="status" aria-live="polite"></span>
+            <span id="jobMessage" class="message" role="status" aria-live="polite"></span>
           </div>
         </form>
-        <pre id="jobOutput" aria-label="Job response">Submit a job to see the response.</pre>
+        <details class="output-block" open>
+          <summary>Job response</summary>
+          <pre id="jobOutput" aria-label="Job response">Submit a job to see the response.</pre>
+        </details>
+        </section>
+      </section>
+
+      <aside class="status-panel stack" aria-labelledby="statusTitle">
+        <div>
+          <h2 id="statusTitle">Readiness</h2>
+          <p id="emptyState">No status loaded yet.</p>
+          <ul id="issues" class="issue-list"></ul>
+        </div>
+        <details class="output-block" open>
+          <summary>Redacted configuration state</summary>
+          <pre id="stateOutput" aria-label="Redacted configuration state">{}</pre>
+        </details>
       </aside>
     </div>
   </main>
@@ -1157,6 +1498,13 @@ function setupHtml(user?: AuthenticatedUser | null): string {
     const agentSlots = document.getElementById('agentSlots');
     const saveAgentSlot = document.getElementById('saveAgentSlot');
     const clearAgentSlot = document.getElementById('clearAgentSlot');
+    const refreshStateTop = document.getElementById('refreshStateTop');
+    const summaryMode = document.getElementById('summaryMode');
+    const summaryNetwork = document.getElementById('summaryNetwork');
+    const summaryRegistry = document.getElementById('summaryRegistry');
+    const summarySecrets = document.getElementById('summarySecrets');
+    const summaryIssues = document.getElementById('summaryIssues');
+    const panelStorageKey = 'langdock-masumi-wrapper.activePanel.v1';
     const slotStorageKey = 'langdock-masumi-wrapper.agentSlots.v1';
     let selectedAgentSlot = 0;
     let registryEnvLoaded = false;
@@ -1168,6 +1516,30 @@ function setupHtml(user?: AuthenticatedUser | null): string {
 
     function setupHeaders() {
       return { };
+    }
+
+    function setActivePanel(panelId) {
+      document.querySelectorAll('[data-panel-target]').forEach((button) => {
+        const isActive = button.getAttribute('data-panel-target') === panelId;
+        button.setAttribute('aria-selected', String(isActive));
+      });
+      document.querySelectorAll('.panel-section').forEach((panel) => {
+        panel.hidden = panel.id !== panelId;
+      });
+      try { localStorage.setItem(panelStorageKey, panelId); } catch {}
+    }
+
+    document.querySelectorAll('[data-panel-target]').forEach((button) => {
+      button.addEventListener('click', () => {
+        setActivePanel(button.getAttribute('data-panel-target'));
+      });
+    });
+
+    function restorePanel() {
+      let saved = 'configPanel';
+      try { saved = localStorage.getItem(panelStorageKey) || saved; } catch {}
+      if (!document.getElementById(saved)) saved = 'configPanel';
+      setActivePanel(saved);
     }
 
     function blankAgentSlot() {
@@ -1298,7 +1670,20 @@ function setupHtml(user?: AuthenticatedUser | null): string {
 
     function setMessage(node, text, kind) {
       node.textContent = text;
-      node.className = kind || '';
+      node.className = kind ? 'message ' + kind : 'message';
+    }
+
+    function setButtonLoading(button, loading, loadingLabel) {
+      if (!button) return;
+      if (!button.dataset.defaultLabel) button.dataset.defaultLabel = button.textContent;
+      button.disabled = loading;
+      if (loading) {
+        button.setAttribute('aria-busy', 'true');
+        button.textContent = loadingLabel || 'Working...';
+      } else {
+        button.removeAttribute('aria-busy');
+        button.textContent = button.dataset.defaultLabel;
+      }
     }
 
     function selectedNetwork() {
@@ -1312,39 +1697,84 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       }
     }
 
+    function populateConfigControls(configured) {
+      if (!configured || typeof configured !== 'object') return;
+      configForm.elements.langdockBaseUrl.value = configured.langdockBaseUrl || 'https://api.langdock.com';
+      configForm.elements.paymentMode.value = configured.paymentMode || 'masumi';
+      configForm.elements.paymentServiceUrl.value = configured.paymentServiceUrl || '';
+      configForm.elements.paymentApiAuthHeader.value = configured.paymentApiAuthHeader || '';
+      const networkField = configForm.querySelector('input[name="network"][value="' + (configured.network || 'Preprod') + '"]');
+      if (networkField) networkField.checked = true;
+
+      configForm.elements.langdockApiKey.placeholder = configured.langdockApiKey ? 'Saved on server' : '';
+      configForm.elements.langdockAgentId.placeholder = configured.langdockAgentId ? 'Saved on server' : '';
+      configForm.elements.paymentApiKey.placeholder = configured.paymentApiKey ? 'Saved on server' : '';
+      configForm.elements.agentIdentifier.placeholder = configured.agentIdentifier ? 'Saved on server' : '';
+      configForm.elements.sellerVKey.placeholder = configured.sellerVKey ? 'Saved on server' : '';
+      if (configured.priceAmountsCount > 0 && !configForm.elements.priceAmounts.value.trim()) {
+        configForm.elements.priceAmounts.placeholder = String(configured.priceAmountsCount) + ' price amount saved on server';
+      }
+      syncPricingUnit();
+    }
+
     function renderState(data) {
       const report = data.report || {};
       applyRegistryStateOnce(data.registry);
+      populateConfigControls(data.configured);
       const ready = report.status === 'ready';
       readyBadge.textContent = ready ? 'Ready' : 'Not ready';
       readyBadge.className = ready ? 'status ready' : 'status not-ready';
+      const configured = data.configured || {};
+      summaryMode.textContent = configured.paymentMode || report.mode || 'masumi';
+      summaryNetwork.textContent = configured.network || report.network || 'Preprod';
+      summaryRegistry.textContent = configured.agentIdentifier
+        ? 'Identifier saved'
+        : data.registry && data.registry.agentName
+          ? 'Profile saved'
+          : 'Not registered';
+      const secretCount = [
+        configured.langdockApiKey,
+        configured.langdockAgentId,
+        configured.paymentApiKey,
+        configured.sellerVKey
+      ].filter(Boolean).length;
+      summarySecrets.textContent = secretCount + '/4 saved';
 
       issues.innerHTML = '';
       const issueList = Array.isArray(report.issues) ? report.issues : [];
       emptyState.hidden = issueList.length > 0;
+      summaryIssues.textContent = issueList.length === 0
+        ? 'No open issues'
+        : issueList.length + ' issue' + (issueList.length === 1 ? '' : 's');
       for (const issue of issueList) {
         const item = document.createElement('li');
         item.textContent = issue.severity + ': ' + issue.message;
+        if (issue.severity === 'error') item.className = 'danger';
+        if (issue.severity === 'info') item.className = 'ok';
         issues.appendChild(item);
       }
       stateOutput.textContent = JSON.stringify(data, null, 2);
     }
 
-    async function refreshState() {
+    async function refreshState(triggerButton) {
+      setButtonLoading(triggerButton, true, 'Refreshing');
       setMessage(configMessage, 'Loading status...', '');
       try {
         const res = await fetch('/setup/config');
         const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Could not load status.');
         renderState(data);
         setMessage(configMessage, 'Status refreshed.', 'success');
       } catch (err) {
         setMessage(configMessage, 'Could not load status. Try again.', 'error');
+      } finally {
+        setButtonLoading(triggerButton, false);
       }
     }
 
     configForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      saveConfig.disabled = true;
+      setButtonLoading(saveConfig, true, 'Applying...');
       configForm.setAttribute('aria-busy', 'true');
       setMessage(configMessage, 'Applying config...', '');
       const payload = {
@@ -1379,12 +1809,13 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       } catch (err) {
         setMessage(configMessage, err instanceof Error ? err.message : 'Could not apply config.', 'error');
       } finally {
-        saveConfig.disabled = false;
+        setButtonLoading(saveConfig, false);
         configForm.removeAttribute('aria-busy');
       }
     });
 
-    document.getElementById('refreshState').addEventListener('click', refreshState);
+    document.getElementById('refreshState').addEventListener('click', (event) => refreshState(event.currentTarget));
+    refreshStateTop.addEventListener('click', (event) => refreshState(event.currentTarget));
     saveAgentSlot.addEventListener('click', saveCurrentAgentSlot);
     clearAgentSlot.addEventListener('click', clearCurrentAgentSlot);
     configForm.addEventListener('change', (event) => {
@@ -1393,7 +1824,8 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       }
     });
 
-    async function refreshRegistryStatus() {
+    async function refreshRegistryStatus(triggerButton) {
+      setButtonLoading(triggerButton, true, 'Refreshing...');
       setMessage(registryMessage, 'Loading registry...', '');
       try {
         const res = await fetch('/setup/registry/status', {
@@ -1406,14 +1838,16 @@ function setupHtml(user?: AuthenticatedUser | null): string {
         await refreshState();
       } catch (err) {
         setMessage(registryMessage, err instanceof Error ? err.message : 'Could not load registry.', 'error');
+      } finally {
+        setButtonLoading(triggerButton, false);
       }
     }
 
-    document.getElementById('refreshRegistry').addEventListener('click', refreshRegistryStatus);
+    document.getElementById('refreshRegistry').addEventListener('click', (event) => refreshRegistryStatus(event.currentTarget));
 
     registryForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      registerAgent.disabled = true;
+      setButtonLoading(registerAgent, true, 'Registering...');
       registryForm.setAttribute('aria-busy', 'true');
       syncPricingUnit();
       setMessage(registryMessage, 'Submitting registration...', '');
@@ -1450,13 +1884,13 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       } catch (err) {
         setMessage(registryMessage, err instanceof Error ? err.message : 'Could not register agent.', 'error');
       } finally {
-        registerAgent.disabled = false;
+        setButtonLoading(registerAgent, false);
         registryForm.removeAttribute('aria-busy');
       }
     });
 
     testLangdock.addEventListener('click', async () => {
-      testLangdock.disabled = true;
+      setButtonLoading(testLangdock, true, 'Testing...');
       setMessage(jobMessage, 'Calling Langdock...', '');
       try {
         const res = await fetch('/setup/langdock/test', {
@@ -1471,13 +1905,13 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       } catch (err) {
         setMessage(jobMessage, err instanceof Error ? err.message : 'Could not call Langdock.', 'error');
       } finally {
-        testLangdock.disabled = false;
+        setButtonLoading(testLangdock, false);
       }
     });
 
     startJobForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      runJob.disabled = true;
+      setButtonLoading(runJob, true, 'Running...');
       startJobForm.setAttribute('aria-busy', 'true');
       setMessage(jobMessage, 'Submitting job...', '');
       const identifier = formValue(startJobForm, 'identifier_from_purchaser');
@@ -1498,11 +1932,24 @@ function setupHtml(user?: AuthenticatedUser | null): string {
       } catch (err) {
         setMessage(jobMessage, err instanceof Error ? err.message : 'Could not submit job.', 'error');
       } finally {
-        runJob.disabled = false;
+        setButtonLoading(runJob, false);
         startJobForm.removeAttribute('aria-busy');
       }
     });
 
+    const logoutButton = document.getElementById('logoutButton');
+    if (logoutButton) {
+      logoutButton.addEventListener('click', async () => {
+        setButtonLoading(logoutButton, true, 'Signing out...');
+        try {
+          await fetch('/auth/logout', { method: 'POST' });
+        } finally {
+          window.location.href = '/';
+        }
+      });
+    }
+
+    restorePanel();
     renderAgentSlots();
     applyAgentSlot(loadAgentSlots()[selectedAgentSlot]);
     syncPricingUnit();

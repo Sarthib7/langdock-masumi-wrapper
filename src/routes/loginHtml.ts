@@ -20,38 +20,38 @@ export function loginHtml(error?: string): string {
   <style>
     :root {
       color-scheme: light dark;
-      --bg: #f5f5f0;
+      --bg: #f6f7f4;
       --panel: #ffffff;
+      --panel-soft: #f1f3ef;
       --text: #1a1a18;
-      --muted: #6b6e65;
-      --border: #d4d6cf;
-      --accent: #0d6b5e;
-      --accent-hover: #0a564c;
+      --muted: #5b605a;
+      --border: #d9ddd5;
+      --accent: #0f6a5f;
+      --accent-soft: #e4f4f1;
       --accent-text: #ffffff;
       --error-bg: #fef2f2;
       --error-text: #991b1b;
       --error-border: #fecaca;
       --input-bg: transparent;
-      --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
-      --shadow-lg: 0 4px 24px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04);
+      --shadow: 0 1px 2px rgba(20, 24, 20, 0.05);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #111110;
-        --panel: #1c1c1a;
+        --bg: #131512;
+        --panel: #1d1f1b;
+        --panel-soft: #252821;
         --text: #eaeae6;
-        --muted: #a0a299;
-        --border: #353732;
-        --accent: #34b8a6;
-        --accent-hover: #2c9d8e;
+        --muted: #b9bbb3;
+        --border: #3a3b35;
+        --accent: #38b7a6;
+        --accent-soft: #153b35;
         --accent-text: #061f1b;
         --error-bg: #1c0f0f;
         --error-text: #f5a0a0;
         --error-border: #4a2020;
         --input-bg: transparent;
-        --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
-        --shadow-lg: 0 4px 24px rgba(0,0,0,0.4), 0 1px 4px rgba(0,0,0,0.2);
+        --shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
       }
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -64,37 +64,39 @@ export function loginHtml(error?: string): string {
       align-items: center;
       justify-content: center;
       padding: 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .auth-shell {
+      width: 100%;
+      max-width: 460px;
     }
     .card {
-      width: 100%;
-      max-width: 420px;
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 16px;
-      box-shadow: var(--shadow-lg);
-      padding: 40px 32px 32px;
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 28px;
     }
     @media (prefers-reduced-motion: no-preference) {
       .card {
-        animation: cardIn 300ms cubic-bezier(0, 0, 0.2, 1) both;
+        animation: cardIn 180ms cubic-bezier(0, 0, 0.2, 1) both;
       }
       @keyframes cardIn {
-        from { opacity: 0; transform: translateY(12px); }
+        from { opacity: 0; transform: translateY(6px); }
         to   { opacity: 1; transform: translateY(0); }
       }
     }
     .logo {
       display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 10px;
-      margin-bottom: 8px;
+      gap: 12px;
+      margin-bottom: 20px;
     }
     .logo-icon {
-      width: 36px;
-      height: 36px;
+      width: 44px;
+      height: 44px;
       background: var(--accent);
-      border-radius: 10px;
+      border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -103,47 +105,35 @@ export function loginHtml(error?: string): string {
       font-size: 18px;
     }
     .logo-text {
-      font-size: 20px;
+      display: block;
+      font-size: 21px;
       font-weight: 750;
-      letter-spacing: -0.02em;
+      letter-spacing: 0;
+      line-height: 1.2;
+    }
+    .eyebrow {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
     }
     .subtitle {
-      text-align: center;
       color: var(--muted);
       font-size: 14px;
-      margin-bottom: 28px;
+      margin-bottom: 22px;
       line-height: 1.5;
     }
-    .tabs {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 4px;
-      padding: 4px;
-      background: color-mix(in srgb, var(--border), transparent 60%);
-      border-radius: 10px;
-      margin-bottom: 24px;
-    }
-    .tab {
-      min-height: 40px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    .security-note {
+      margin-bottom: 18px;
+      border: 1px solid var(--border);
       border-radius: 8px;
-      font-size: 14px;
-      font-weight: 700;
-      cursor: pointer;
-      border: none;
-      background: transparent;
+      padding: 10px 12px;
+      background: var(--panel-soft);
       color: var(--muted);
-      transition: background 120ms ease-out, color 120ms ease-out;
-    }
-    .tab[aria-selected="true"] {
-      background: var(--panel);
-      color: var(--text);
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    }
-    .tab:hover:not([aria-selected="true"]) {
-      color: var(--text);
+      font-size: 13px;
+      line-height: 1.45;
     }
     form {
       display: grid;
@@ -171,9 +161,9 @@ export function loginHtml(error?: string): string {
       padding: 10px 14px;
       font: inherit;
       font-size: 15px;
-      background: var(--input-bg);
+      background: color-mix(in srgb, var(--panel), var(--bg) 20%);
       color: var(--text);
-      transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+      transition: border-color 120ms ease-out, box-shadow 120ms ease-out, background-color 120ms ease-out;
     }
     input::placeholder {
       color: color-mix(in srgb, var(--muted), transparent 25%);
@@ -200,7 +190,7 @@ export function loginHtml(error?: string): string {
       padding: 10px 14px;
       font-size: 14px;
       font-weight: 600;
-      margin-bottom: 8px;
+      margin-bottom: 16px;
     }
     .password-wrap {
       position: relative;
@@ -219,13 +209,13 @@ export function loginHtml(error?: string): string {
       color: var(--muted);
       font-size: 12px;
       font-weight: 700;
-      padding: 6px 4px;
-      border-radius: 4px;
-      min-height: 32px;
-      min-width: 32px;
-      transition: color 120ms ease-out;
+      padding: 6px 8px;
+      border-radius: 6px;
+      min-height: 36px;
+      min-width: 44px;
+      transition: color 120ms ease-out, background-color 120ms ease-out;
     }
-    .toggle-pw:hover { color: var(--text); }
+    .toggle-pw:hover { color: var(--text); background: var(--panel-soft); }
     .toggle-pw:focus-visible {
       outline: none;
       box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent), transparent 50%);
@@ -241,14 +231,14 @@ export function loginHtml(error?: string): string {
       font-size: 15px;
       font-weight: 750;
       cursor: pointer;
-      transition: background 120ms ease-out, transform 60ms ease-out;
+      transition: background-color 120ms ease-out, transform 80ms ease-out;
       margin-top: 4px;
     }
     .submit:hover {
-      background: var(--accent-hover);
+      background: color-mix(in srgb, var(--accent), black 10%);
     }
     .submit:active {
-      transform: scale(0.985);
+      transform: translateY(1px);
     }
     .submit:disabled {
       opacity: 0.6;
@@ -259,31 +249,36 @@ export function loginHtml(error?: string): string {
       outline: none;
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent), transparent 50%);
     }
-    .register-fields { display: none; }
-    .register-fields.active { display: grid; gap: 16px; }
-    .divider {
-      height: 1px;
-      background: var(--border);
-      margin: 4px 0;
-    }
     .footer {
-      text-align: center;
       font-size: 12px;
       color: var(--muted);
       margin-top: 20px;
+      line-height: 1.5;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+      }
     }
     @media (max-width: 480px) {
-      .card { padding: 28px 20px 24px; border-radius: 12px; }
+      body { padding: 16px; align-items: flex-start; }
+      .card { padding: 22px 18px; }
     }
   </style>
 </head>
 <body>
-  <main class="card">
+  <main class="auth-shell">
+  <section class="card" aria-labelledby="loginTitle">
     <div class="logo">
       <div class="logo-icon" aria-hidden="true">LM</div>
-      <span class="logo-text">Langdock Masumi</span>
+      <div>
+        <span class="eyebrow">Operator access</span>
+        <h1 id="loginTitle" class="logo-text">Langdock Masumi</h1>
+      </div>
     </div>
     <p class="subtitle">Sign in with the admin credentials configured on this server.</p>
+    <p class="security-note">Browser registration is disabled. Admin credentials must be set in the deployment environment.</p>
     ${errorHtml}
     <form id="authForm" novalidate>
       <input type="hidden" name="mode" value="${effectiveMode}" />
@@ -321,8 +316,9 @@ export function loginHtml(error?: string): string {
       <button class="submit" type="submit" id="submitBtn">Sign in</button>
     </form>
     <p class="footer">
-      Admin credentials are configured on the server. Sessions are stored locally.
+      Sessions use secure HTTP-only cookies. Failed login attempts are rate limited.
     </p>
+  </section>
   </main>
 
   <script>
@@ -336,6 +332,7 @@ export function loginHtml(error?: string): string {
         event.preventDefault();
         formError.style.display = 'none';
         submitBtn.disabled = true;
+        submitBtn.setAttribute('aria-busy', 'true');
         submitBtn.textContent = 'Signing in...';
 
         var payload = {
@@ -359,6 +356,7 @@ export function loginHtml(error?: string): string {
           formError.textContent = err instanceof Error ? err.message : 'Something went wrong.';
           formError.style.display = '';
           submitBtn.disabled = false;
+          submitBtn.removeAttribute('aria-busy');
           submitBtn.textContent = 'Sign in';
         });
       });
