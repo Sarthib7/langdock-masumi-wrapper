@@ -7,9 +7,12 @@
  * the job and submits the final transcript hash to Masumi.
  */
 
-import type { FastifyInstance } from "fastify";
-import { loadConfig } from "../config.js";
-import { computeInputHash } from "../services/hashing.js";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { findAgentProfile, loadConfig } from "../config.js";
+import {
+  computeCanonicalJsonHash,
+  computeInputHash,
+} from "../services/hashing.js";
 import {
   continueHitlChatJob,
   inputObjectToMessage,
@@ -27,6 +30,8 @@ export type ProvideInputBody = {
   input_token?: unknown;
   inputToken?: unknown;
   continuationToken?: unknown;
+  input_schema_hash?: unknown;
+  inputSchemaHash?: unknown;
   input_data?: unknown;
   inputData?: unknown;
 };
@@ -54,7 +59,11 @@ function normalizeInputData(value: unknown): Record<string, unknown> | undefined
 }
 
 export function registerProvideInput(app: FastifyInstance): void {
-  app.post("/provide_input", async (request, reply) => {
+  async function handleProvideInput(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    routeAgentSlug?: string,
+  ) {
     const body =
       request.body && typeof request.body === "object" && !Array.isArray(request.body)
         ? (request.body as ProvideInputBody)
@@ -104,6 +113,22 @@ export function registerProvideInput(app: FastifyInstance): void {
         message: `No job exists with ID: ${jobId}`,
       });
     }
+    if (routeAgentSlug) {
+      const config = loadConfig();
+      const agent = findAgentProfile(config, routeAgentSlug);
+      if (!agent) {
+        return reply.status(404).send({
+          error: "AGENT_NOT_FOUND",
+          message: `No agent is configured for slug: ${routeAgentSlug}`,
+        });
+      }
+      if (job.agent_slug !== agent.slug) {
+        return reply.status(404).send({
+          error: "JOB_NOT_FOUND",
+          message: `No job exists with ID: ${jobId}`,
+        });
+      }
+    }
 
     const headerToken = request.headers["x-job-token"];
     const providedToken =
@@ -111,14 +136,28 @@ export function registerProvideInput(app: FastifyInstance): void {
       str(body.inputToken) ??
       str(body.continuationToken) ??
       (typeof headerToken === "string" ? headerToken : undefined);
+    const hasValidToken = Boolean(
+      job.continuation_token_hash &&
+        providedToken &&
+        verifyOpaqueToken(providedToken, job.continuation_token_hash),
+    );
+    const providedInputSchemaHash =
+      str(body.input_schema_hash) ?? str(body.inputSchemaHash);
+    const hasMatchingRoutedSchemaHash = Boolean(
+      routeAgentSlug &&
+        providedInputSchemaHash &&
+        job.awaiting_input_schema &&
+        computeCanonicalJsonHash(job.awaiting_input_schema) ===
+          providedInputSchemaHash,
+    );
     if (
-      !job.continuation_token_hash ||
-      !providedToken ||
-      !verifyOpaqueToken(providedToken, job.continuation_token_hash)
+      !hasValidToken &&
+      !hasMatchingRoutedSchemaHash
     ) {
       return reply.status(403).send({
         error: "HITL_TOKEN_REQUIRED",
-        message: "A valid HITL continuation token is required.",
+        message:
+          "A valid HITL continuation token or matching routed input_schema_hash is required.",
       });
     }
 
@@ -166,5 +205,16 @@ export function registerProvideInput(app: FastifyInstance): void {
       output_hash: updated?.output_hash,
       error: updated?.error,
     });
+  }
+
+  app.post("/provide_input", async (request, reply) => {
+    return handleProvideInput(request, reply);
   });
+
+  app.post<{ Params: { agentSlug: string } }>(
+    "/agents/:agentSlug/provide_input",
+    async (request, reply) => {
+      return handleProvideInput(request, reply, request.params.agentSlug);
+    },
+  );
 }

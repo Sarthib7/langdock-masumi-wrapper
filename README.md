@@ -18,7 +18,7 @@ It implements:
   `/input_schema` routes — one deployed wrapper can host multiple registered
   Langdock/Masumi agents.
 - `GET  /status`      — MIP-003 payload with `input_hash`, `output_hash`, result, timestamps, and HITL prompts when awaiting input.
-- `POST /provide_input` — optional HITL chat continuation for Langdock agents; send follow-up input or `DONE` to finish.
+- `POST /provide_input` and `POST /agents/:slug/provide_input` — optional HITL chat continuation for Langdock agents; send follow-up input or `DONE` to finish.
 - `GET  /availability` — health for load balancers / marketplace checks.
 - `GET  /input_schema` — schema shown to buyers on Sokosumi.
 - `GET  /ready` — operator readiness report for missing production secrets/config.
@@ -159,6 +159,40 @@ agent endpoints use their matching profile instead:
 ```env
 AGENTS_JSON=[{"slug":"research","name":"Research Agent","description":"Answers research tasks.","apiBaseUrl":"https://wrapper.example.com/agents/research","langdockAgentId":"LANGDOCK_AGENT_ID_HERE","agentIdentifier":"MASUMI_AGENT_IDENTIFIER_AFTER_REGISTRATION","priceAmounts":[{"amount":"1000000","unit":"PREPROD_TUSDM_OR_MAINNET_USDCX_ASSET_ID"}]}]
 ```
+
+### Local test-agent smoke
+
+For preprod smoke testing, the repo includes helper scripts for four routed
+agents named `Test Agent 1` through `Test Agent 4`. The local smoke does not
+touch Masumi, Sokosumi, Railway, or Langdock. It runs the wrapper in direct mode
+and mocks the Langdock completion call:
+
+```bash
+npm run smoke:test-agents
+```
+
+To generate a deployable `AGENTS_JSON` value that appends or updates
+`test-agent-1` through `test-agent-4`, run:
+
+```bash
+PUBLIC_BASE_URL="https://your-wrapper.example.com" \
+AGENTS_JSON="$AGENTS_JSON" \
+npm --silent run agents:test-json
+```
+
+The generator preserves existing profiles and copies Langdock agent IDs from
+source slugs when present: `lexi`, `emil-conrad`, `diddy-p`, and
+`food-co2-analyst`. You can also provide explicit IDs with
+`TEST_AGENT_1_LANGDOCK_AGENT_ID` through `TEST_AGENT_4_LANGDOCK_AGENT_ID`.
+After Masumi registry confirmation, set
+`TEST_AGENT_1_AGENT_IDENTIFIER` through `TEST_AGENT_4_AGENT_IDENTIFIER` and run
+the generator again to produce the final `AGENTS_JSON` for deployment. Keep
+`priceAmounts: []` on these routed profiles when their pricing is fixed in the
+Masumi registry.
+
+Sokosumi preprod can only start jobs against a public wrapper URL. A purely
+local server on `localhost` is not reachable from Sokosumi unless you expose it
+through a tunnel and use that tunnel URL as `PUBLIC_BASE_URL`.
 
 #### Credential guide
 

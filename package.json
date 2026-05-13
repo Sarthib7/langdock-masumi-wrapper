@@ -19,6 +19,8 @@
     "build": "tsc",
     "start": "node dist/app.js",
     "check:production": "node dist/productionCheck.js",
+    "agents:test-json": "node scripts/build-test-agents-json.mjs",
+    "smoke:test-agents": "npm run build && node scripts/test-agents-local-smoke.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

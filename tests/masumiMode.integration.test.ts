@@ -336,6 +336,92 @@ describe("POST /start_job in masumi mode with mocked Payment Service", () => {
     await app.close();
   });
 
+  it("marks a job refunded when the payment datum is invalid", async () => {
+    const blockchainIdentifier = "block_invalid_datum";
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async (
+          url: string,
+          init?: {
+            method?: string;
+            body?: string;
+            headers?: Record<string, string>;
+          },
+        ) => {
+          const method = init?.method ?? "GET";
+          const u = typeof url === "string" ? url : String(url);
+
+          if (u.endsWith("/api/v1/payment") && method === "POST") {
+            return {
+              ok: true,
+              status: 200,
+              text: async () =>
+                JSON.stringify({
+                  data: {
+                    blockchainIdentifier,
+                    payByTime: "1800000000",
+                    submitResultTime: "1800001000",
+                    unlockTime: "1800002000",
+                    externalDisputeUnlockTime: "1800003000",
+                  },
+                }),
+            };
+          }
+
+          if (
+            u.endsWith("/api/v1/payment/resolve-blockchain-identifier") &&
+            method === "POST"
+          ) {
+            return {
+              ok: true,
+              status: 200,
+              text: async () =>
+                JSON.stringify({
+                  data: {
+                    blockchainIdentifier,
+                    onChainState: "FundsOrDatumInvalid",
+                  },
+                }),
+            };
+          }
+
+          throw new Error(`Unexpected fetch: ${method} ${u}`);
+        },
+      ) as unknown as typeof fetch,
+    );
+
+    const handler = new AgentEndpointHandler();
+    const handlerSpy = vi.fn(async () => ({ should: "not run" }));
+    handler.setStartJobHandler(handlerSpy);
+
+    const app = await buildApp({ endpointHandler: handler });
+    const res = await app.inject({
+      method: "POST",
+      url: "/start_job",
+      payload: {
+        identifier_from_purchaser: "aabbccddeeff0011",
+        input_data: [{ key: "text", value: "hello" }],
+      },
+    });
+
+    expect(res.statusCode, res.body).toBe(200);
+    const jobId = (res.json() as { id: string }).id;
+
+    const { getJob } = await import("../src/services/jobs.js");
+    await waitUntil(() => getJob(jobId)?.status === "refunded");
+
+    const final = getJob(jobId);
+    expect(final?.status).toBe("refunded");
+    expect(final?.error).toBe(
+      "Payment terminated on-chain: FundsOrDatumInvalid",
+    );
+    expect(handlerSpy).not.toHaveBeenCalled();
+
+    await app.close();
+  });
+
   it("rejects purchaser identifiers that the Masumi payment API cannot accept", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);

@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
-import { computeInputHash } from "../src/services/hashing.js";
+import {
+  computeCanonicalJsonHash,
+  computeInputHash,
+} from "../src/services/hashing.js";
 import { createJob, __resetJobsForTests } from "../src/services/jobs.js";
 import { hitlInputSchema } from "../src/services/hitlChat.js";
 import { hashOpaqueToken } from "../src/services/opaqueTokens.js";
@@ -73,6 +76,60 @@ describe("POST /provide_input", () => {
     expect(json.output_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(json.result).toContain("User: hello");
     expect(json.result).toContain("Lexi: hi");
+
+    await app.close();
+  });
+
+  it("accepts routed HITL continuation with matching input schema hash", async () => {
+    process.env.AGENTS_JSON = JSON.stringify([
+      {
+        slug: "test-agent",
+        name: "Test Agent",
+        description: "Routed HITL test agent",
+        langdockAgentId: "ld-test-agent",
+        agentIdentifier: "agent-test",
+      },
+    ]);
+    createJob({
+      id: "job-hitl-routed",
+      blockchainIdentifier: "direct_job-hitl-routed",
+      identifierFromPurchaser: "aabbccddeeff0014",
+      input_hash: "3".repeat(64),
+      input_data: [{ key: "text", value: "hello" }],
+      status: "awaiting_input",
+      payByTime: 1,
+      submitResultTime: 2,
+      unlockTime: 3,
+      externalDisputeUnlockTime: 4,
+      amounts: [],
+      agent_slug: "test-agent",
+      continuation_token_hash: hashOpaqueToken(HITL_TOKEN),
+    });
+
+    const { setJobStatus } = await import("../src/services/jobs.js");
+    setJobStatus("job-hitl-routed", "awaiting_input", {
+      awaiting_input_schema: hitlInputSchema(),
+      awaiting_input_message: "Reply or type DONE.",
+      conversation: [
+        { id: "u1", role: "user", parts: [{ type: "text", text: "hello" }] },
+        { id: "a1", role: "assistant", parts: [{ type: "text", text: "hi" }] },
+      ],
+      result: "hi",
+    });
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/agents/test-agent/provide_input",
+      payload: {
+        jobId: "job-hitl-routed",
+        inputSchemaHash: computeCanonicalJsonHash(hitlInputSchema()),
+        inputData: { message: "", finish: true },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { status: string }).status).toBe("completed");
 
     await app.close();
   });

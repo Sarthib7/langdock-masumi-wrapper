@@ -50,6 +50,15 @@ export function computeOutputHash(
   return createHash("sha256").update(preimage, "utf8").digest("hex");
 }
 
+/** SHA-256 over JCS-canonical JSON, used for Sokosumi HITL input schema checks. */
+export function computeCanonicalJsonHash(value: unknown): string {
+  const canonical = canonicalize(value);
+  if (canonical === undefined) {
+    throw new Error("value could not be canonicalized (JCS)");
+  }
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
 /** Stable stringifier for a handler result before hashing. */
 export function stringifyForHash(value: unknown): string {
   if (typeof value === "string") return value;
