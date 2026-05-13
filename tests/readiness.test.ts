@@ -41,6 +41,11 @@ function setAdminEnv(): void {
   process.env.SETUP_PASSWORD_HASH = "$2b$12$abcdefghijklmnopqrstuuK7r2cFOP7JPrbMV7xYUq/xp1n0JRXD6";
 }
 
+function setPlainAdminEnv(): void {
+  process.env.SETUP_USERNAME = "admin";
+  process.env.SETUP_PASSWORD = "admin-password-123";
+}
+
 describe("getReadinessReport", () => {
   afterEach(() => {
     process.env = { ...ORIGINAL_ENV };
@@ -70,6 +75,21 @@ describe("getReadinessReport", () => {
 
     const report = getReadinessReport(loadConfig());
     expect(report.status).toBe("ready");
+  });
+
+  it("accepts username and plaintext password setup without readiness warnings", () => {
+    resetEnv();
+    process.env.PAYMENT_MODE = "direct";
+    process.env.LANGDOCK_API_KEY = "ld-key";
+    process.env.LANGDOCK_AGENT_ID = "agent-id";
+    setPlainAdminEnv();
+    process.env.PRICE_AMOUNTS = JSON.stringify([
+      { amount: "1000000", unit: PREPROD_TUSDM_UNIT },
+    ]);
+
+    const report = getReadinessReport(loadConfig());
+    expect(report.status).toBe("ready");
+    expect(report.issues).toEqual([]);
   });
 
   it("requires Masumi identity and payment-service credentials in masumi mode", () => {

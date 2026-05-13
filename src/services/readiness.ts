@@ -352,14 +352,6 @@ export function getReadinessReport(config: AppConfig): ReadinessReport {
       ["SETUP_USERNAME", "SETUP_PASSWORD_HASH or SETUP_PASSWORD"],
       "Admin login credentials must be configured on the server because browser registration is disabled.",
     );
-  } else if (!hasValue(rawEnv("SETUP_PASSWORD_HASH"))) {
-    issues.push({
-      severity: "warning",
-      code: "plaintext_setup_password",
-      env: ["SETUP_PASSWORD"],
-      message:
-        "SETUP_PASSWORD_HASH is preferred so the admin password is not stored plaintext in environment files.",
-    });
   }
 
   if (config.paymentMode === "direct" && process.env.NODE_ENV === "production") {
