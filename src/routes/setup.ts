@@ -16,6 +16,7 @@ import type {
   MasumiNetwork,
   PaymentApiAuthHeader,
   PaymentMode,
+  PriceAmount,
 } from "../config.js";
 import { findAgentProfile, loadConfig, normalizeAgentSlug } from "../config.js";
 import type { BridgeContext } from "./bridgeContext.js";
@@ -76,6 +77,7 @@ type RegistrySetupBody = {
   authorContactOther?: unknown;
   authorOrganization?: unknown;
   tags?: unknown;
+  pricing?: unknown;
   pricingAmount?: unknown;
   pricingUnit?: unknown;
   exampleOutputs?: unknown;
@@ -175,6 +177,63 @@ function normalizeRegistryExampleOutputs(
     }
     return { name, url, mimeType };
   });
+}
+
+function normalizeRegistryPricing(
+  pricingValue: unknown,
+  pricingAmountValue: unknown,
+  pricingUnitValue: unknown,
+  network: MasumiNetwork,
+): PriceAmount[] {
+  const rawPricing = str(pricingValue);
+  if (
+    Array.isArray(pricingValue) ||
+    (rawPricing !== undefined && rawPricing !== "")
+  ) {
+    let parsed: unknown;
+    if (Array.isArray(pricingValue)) {
+      parsed = pricingValue;
+    } else {
+      try {
+        parsed = JSON.parse(rawPricing ?? "[]") as unknown;
+      } catch {
+        throw new Error("Pricing must be valid JSON array of {amount, unit}.");
+      }
+    }
+
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      throw new Error("Pricing must include at least one {amount, unit} row.");
+    }
+
+    return parsed.map((item, index) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        throw new Error(`Pricing row ${index + 1} must be an object.`);
+      }
+      const record = item as Record<string, unknown>;
+      const amount = str(record.amount);
+      const unit = str(record.unit);
+      if (!amount || !/^[0-9]+$/.test(amount) || BigInt(amount) <= 0n) {
+        throw new Error(
+          `Pricing row ${index + 1} amount must be a positive integer raw token amount.`,
+        );
+      }
+      if (unit === undefined) {
+        throw new Error(`Pricing row ${index + 1} unit must be a string.`);
+      }
+      return { amount, unit };
+    });
+  }
+
+  const pricingAmount = requireString(pricingAmountValue, "Price amount");
+  if (!/^[0-9]+$/.test(pricingAmount) || BigInt(pricingAmount) <= 0n) {
+    throw new Error("Price amount must be a positive integer raw token amount.");
+  }
+  return [
+    {
+      amount: pricingAmount,
+      unit: str(pricingUnitValue) || defaultPricingUnit(network),
+    },
+  ];
 }
 
 function splitCsv(value: unknown): string[] {
@@ -2486,10 +2545,12 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
         throw new Error("Masumi registry accepts at most 15 tags.");
       }
 
-      const pricingAmount = requireString(body.pricingAmount, "Price amount");
-      if (!/^[0-9]+$/.test(pricingAmount) || BigInt(pricingAmount) <= 0n) {
-        throw new Error("Price amount must be a positive integer raw token amount.");
-      }
+      const pricing = normalizeRegistryPricing(
+        body.pricing,
+        body.pricingAmount,
+        body.pricingUnit,
+        config.masumiNetwork,
+      );
 
       const agentName = requireString(body.agentName, "Agent name");
       const agentDescription = requireString(body.agentDescription, "Description");
@@ -2530,12 +2591,7 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
           terms: str(body.legalTerms),
           other: str(body.legalOther),
         },
-        pricing: [
-          {
-            amount: pricingAmount,
-            unit: str(body.pricingUnit) || defaultPricingUnit(config.masumiNetwork),
-          },
-        ],
+        pricing,
       });
 
       if (result.agentIdentifier) {

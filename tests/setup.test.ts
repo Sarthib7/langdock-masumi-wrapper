@@ -53,6 +53,8 @@ function resetEnv(): void {
 
 const ADMIN_USERNAME = "admin";
 const ADMIN_PASSWORD = "admin-password-123";
+const PREPROD_TUSDM_UNIT =
+  "16a55b2a349361ff88c03788f93e1e966e5d689605d044fef722ddde0014df10745553444d";
 
 /** Log in with configured admin credentials and return the session cookie. */
 async function loginAndGetCookie(
@@ -647,6 +649,100 @@ describe("setup UI", () => {
     const env = await readFile(process.env.SETUP_ENV_PATH!, "utf8");
     expect(env).toContain("AGENTS_JSON=");
     expect(env).not.toContain("AGENT_IDENTIFIER=asset_research_identifier_123");
+
+    await app.close();
+  });
+
+  it("passes explicit Masumi registry pricing rows through unchanged", async () => {
+    const expectedPricing = [
+      { amount: "5000000", unit: PREPROD_TUSDM_UNIT },
+      { amount: "5000000", unit: "lovelace" },
+    ];
+    const fetchMock = vi.fn(async (_url: URL | RequestInfo, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        AgentPricing?: { Pricing?: unknown };
+      };
+      expect(body.AgentPricing?.Pricing).toEqual(expectedPricing);
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            status: "success",
+            data: {
+              state: "RegistrationRequested",
+              agentIdentifier: "asset_priced_identifier_123",
+            },
+          }),
+      };
+    }) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
+    process.env.PAYMENT_API_KEY = "payment-admin-key";
+    process.env.PAYMENT_API_AUTH_HEADER = "token";
+    process.env.SELLER_VKEY = "seller-vkey";
+    process.env.NETWORK = "Preprod";
+
+    const app = await buildApp();
+    const cookie = await sessionCookie(app);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/setup/registry/register",
+      headers: { cookie },
+      payload: {
+        agentName: "Langdock Agent",
+        agentDescription: "Agent for Langdock test jobs",
+        agentApiBaseUrl: "https://agent.example.com",
+        capabilityName: "langdock-agent",
+        capabilityVersion: "1.0.0",
+        authorName: "Test Author",
+        tags: "langdock,masumi",
+        pricing: expectedPricing,
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    await app.close();
+  });
+
+  it("rejects invalid explicit Masumi registry pricing before calling Masumi", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
+    process.env.PAYMENT_API_KEY = "payment-admin-key";
+    process.env.SELLER_VKEY = "seller-vkey";
+
+    const app = await buildApp();
+    const cookie = await sessionCookie(app);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/setup/registry/register",
+      headers: { cookie },
+      payload: {
+        agentName: "Langdock Agent",
+        agentDescription: "Agent for Langdock test jobs",
+        agentApiBaseUrl: "https://agent.example.com",
+        capabilityName: "langdock-agent",
+        capabilityVersion: "1.0.0",
+        authorName: "Test Author",
+        tags: "langdock,masumi",
+        pricing: [{ amount: "0", unit: "lovelace" }],
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: "REGISTRY_REGISTRATION_FAILED",
+      message:
+        "Pricing row 1 amount must be a positive integer raw token amount.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
 
     await app.close();
   });
