@@ -21,6 +21,9 @@
     "check:production": "node dist/productionCheck.js",
     "agents:test-json": "node scripts/build-test-agents-json.mjs",
     "smoke:test-agents": "npm run build && node scripts/test-agents-local-smoke.mjs",
+    "db:migrate-auth": "node scripts/migrate-auth.mjs",
+    "admin:create-user": "npm run build && node scripts/admin-create-user.mjs",
+    "admin:hash": "node scripts/admin-hash.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -29,11 +32,13 @@
     "canonicalize": "^2.1.0",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
+    "pg": "^8.20.0",
     "sql.js": "^1.14.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.14.0",
+    "@types/pg": "^8.20.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3",
     "vitest": "^3.1.1"

@@ -407,6 +407,18 @@ export function getReadinessReport(config: AppConfig): ReadinessReport {
       ["SETUP_USERNAME", "SETUP_PASSWORD_HASH or SETUP_PASSWORD"],
       "Admin login credentials must be configured on the server because browser registration is disabled.",
     );
+  } else if (
+    process.env.NODE_ENV === "production" &&
+    !hasValue(rawEnv("SETUP_PASSWORD_HASH")) &&
+    hasValue(rawEnv("SETUP_PASSWORD"))
+  ) {
+    issues.push({
+      severity: "warning",
+      code: "plaintext_admin_password",
+      env: ["SETUP_PASSWORD", "SETUP_PASSWORD_HASH"],
+      message:
+        "Production deployment is using a plaintext SETUP_PASSWORD. Generate a bcrypt hash with `npm run admin:hash` and set SETUP_PASSWORD_HASH instead so the env var does not show plaintext in logs or Railway settings.",
+    });
   }
 
   if (config.paymentMode === "direct" && process.env.NODE_ENV === "production") {
