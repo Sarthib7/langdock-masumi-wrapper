@@ -755,6 +755,7 @@ async function persistAgentIdentifier(agentIdentifier: string): Promise<void> {
 function setupHtml(user?: AuthenticatedUser | null): string {
   const userBadge = user
     ? `<div class="user-badge">
+        <a href="/admin" class="logout-btn secondary" style="text-decoration:none;display:inline-flex;align-items:center;">Operator dashboard</a>
         <span class="user-avatar" aria-hidden="true">${escSetupHtml((user.displayName || user.username).charAt(0).toUpperCase())}</span>
         <span class="user-name">${escSetupHtml(user.displayName || user.username)}</span>
         <button type="button" id="logoutButton" class="logout-btn secondary">Sign out</button>
