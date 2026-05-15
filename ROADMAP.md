@@ -140,6 +140,12 @@ Out of scope for v1, deferred:
       replaced (Phase 3).
 - [ ] **`/availability` probe per agent** alongside the global payment
       health probe — currently only the payment service is probed.
+- [ ] **Better payment-service probe path.** v1 hits
+      `PAYMENT_SERVICE_URL/health`, which Masumi does not actually expose.
+      Production will return HTTP 404, which the dashboard correctly
+      surfaces as a yellow "warn HTTP 404" badge — host is reachable, path
+      isn't right. Either pick a real reachable path (e.g. an unauth GET
+      on `/payment` with the API key) or downgrade 404 to "reachable".
 
 Explicit non-goals (still):
 - No write actions besides logout.
