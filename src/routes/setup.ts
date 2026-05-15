@@ -2258,7 +2258,7 @@ function setSessionCookie(reply: import("fastify").FastifyReply, token: string):
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   reply.header(
     "set-cookie",
-    `session=${encodeURIComponent(token)}; Path=/; Max-Age=86400; SameSite=Strict; HttpOnly${secure}`,
+    `session=${encodeURIComponent(token)}; Path=/; Max-Age=86400; SameSite=Lax; HttpOnly${secure}`,
   );
 }
 
@@ -2284,7 +2284,8 @@ function escSetupHtml(s: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
@@ -2359,7 +2360,7 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
     const token = sessionTokenFromRequest(request);
     if (token) await logoutUser(token);
     return reply
-      .header("set-cookie", "session=; path=/; max-age=0; SameSite=Strict")
+      .header("set-cookie", "session=; path=/; max-age=0; SameSite=Lax")
       .send({ ok: true });
   });
 

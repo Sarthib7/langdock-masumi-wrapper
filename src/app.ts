@@ -27,14 +27,71 @@ export function createDefaultEndpointHandler(): AgentEndpointHandler {
   return handler;
 }
 
+const SECURITY_HEADERS_HTML: Readonly<Record<string, string>> = {
+  // Inline scripts/styles are still used by /setup; tighten with nonces later.
+  "content-security-policy":
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+  "x-frame-options": "DENY",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "same-origin",
+  "permissions-policy": "geolocation=(), microphone=(), camera=()",
+};
+
+const SECURITY_HEADERS_JSON: Readonly<Record<string, string>> = {
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "x-frame-options": "DENY",
+};
+
 /**
  * Creates a Fastify instance with MIP-003 routes and the given or default handler bundle.
  */
 export async function buildApp(options?: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: true,
+    // Trust Railway / proxy edge so request.ip reflects the real client.
+    trustProxy: true,
+    logger: {
+      // Pino redaction keeps cookies and bearer tokens out of Railway logs.
+      redact: {
+        paths: [
+          "req.headers.authorization",
+          "req.headers.cookie",
+          'req.headers["x-job-token"]',
+          'req.headers["x-forwarded-for"]',
+          "res.headers['set-cookie']",
+          "*.password",
+          "*.password_hash",
+          "*.token",
+          "*.apiKey",
+          "*.api_key",
+        ],
+        censor: "[redacted]",
+      },
+    },
     bodyLimit: 256 * 1024,
   });
+
+  app.addHook("onSend", async (request, reply, payload) => {
+    const contentType = String(reply.getHeader("content-type") ?? "");
+    const headers = contentType.includes("text/html")
+      ? SECURITY_HEADERS_HTML
+      : SECURITY_HEADERS_JSON;
+    for (const [name, value] of Object.entries(headers)) {
+      if (!reply.getHeader(name)) reply.header(name, value);
+    }
+    // HSTS only when the original connection is HTTPS (Railway terminates TLS).
+    const proto =
+      (request.headers["x-forwarded-proto"] as string | undefined) ??
+      request.protocol;
+    if (proto === "https" && !reply.getHeader("strict-transport-security")) {
+      reply.header(
+        "strict-transport-security",
+        "max-age=63072000; includeSubDomains; preload",
+      );
+    }
+    return payload;
+  });
+
   const endpointHandler =
     options?.endpointHandler ?? createDefaultEndpointHandler();
   await registerRoutes(app, { endpointHandler });

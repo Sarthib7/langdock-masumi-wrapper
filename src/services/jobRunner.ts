@@ -91,6 +91,30 @@ export function runWithPayment(
   },
 ): void {
   void (async () => {
+    try {
+      await runWithPaymentLoop(ctx);
+    } catch (e) {
+      // Last-ditch safety net so an unexpected throw in the poller never leaves
+      // the job stuck in "awaiting_payment" forever.
+      try {
+        setJobStatus(ctx.jobId, "failed", {
+          error: `Payment poller crashed: ${handlerErrorMessage(e)}`,
+          failedAt: Date.now(),
+        });
+      } catch {
+        /* swallowed — job store unreachable */
+      }
+    }
+  })();
+}
+
+async function runWithPaymentLoop(
+  ctx: RunContext & {
+    blockchainIdentifier: string;
+    client: MasumiPaymentClient;
+    config: AppConfig;
+  },
+): Promise<void> {
     const started = Date.now();
     const { client, blockchainIdentifier } = ctx;
 
@@ -158,5 +182,4 @@ export function runWithPayment(
         });
       }
     }
-  })();
 }
