@@ -1,6 +1,6 @@
 # Roadmap — langdock-masumi-wrapper
 
-Last updated: **2026-05-15**
+Last updated: **2026-05-15** (after `improvement/audit-auth-dashboard` commits 1–4)
 
 This roadmap tracks the path from "working Preprod wrapper" → "production
 Mainnet wrapper with admin-issued logins and a real ops dashboard."
@@ -15,9 +15,9 @@ changes the MIP-003 contract; behind-the-scenes work only.
 
 | Phase | Theme | Status |
 |-------|-------|--------|
-| 0 | Audit + hardening (`improvement/audit-auth-dashboard` branch) | In progress |
-| 1 | Admin-issued login + Railway Postgres | Planned |
-| 2 | Read-only admin dashboard | Planned |
+| 0 | Audit + hardening (`improvement/audit-auth-dashboard` branch) | ✓ Code shipped, pending review/merge |
+| 1 | Admin-issued login + Railway Postgres | ⚠ Adapter shipped, plugin not yet provisioned |
+| 2 | Read-only admin dashboard | ✓ v1 shipped (`/admin`), polish remaining |
 | 3 | Durable job store on Postgres | Planned |
 | 4 | Mainnet enablement | Planned |
 | 5 | Observability + on-call | Planned |
@@ -27,27 +27,35 @@ changes the MIP-003 contract; behind-the-scenes work only.
 
 ## Phase 0 — Audit + hardening (this branch)
 
-Source of truth: [AUDIT.md](AUDIT.md).
+Source of truth: [AUDIT.md](AUDIT.md). All shipped in commits `0c8bef0`,
+`3536020`, `7ebf0cb`, `51f4a47` on `improvement/audit-auth-dashboard`.
 
-Ship before merging:
+Done:
+- [x] H1 trust proxy (`trustProxy: true` in `src/app.ts`).
+- [x] H2 background poller crash safety (top-level try/catch in
+      `runWithPayment` → `runWithPaymentLoop`).
+- [x] H3 security headers (CSP, frame, sniff, referrer, conditional HSTS)
+      via `onSend` hook. No new dep — kept the surface minimal.
+- [x] H4 readiness *warning* for plaintext `SETUP_PASSWORD` in production
+      (deliberate: keeps the `b21da27` decision). Added `npm run admin:hash`.
+- [x] M1 rate-limit bucket sweep + 10k hard cap.
+- [x] M2 cookie `SameSite=Lax`.
+- [x] M5 pino redaction (cookies, authorization, tokens, password fields).
+- [x] L1 escape `'` in `escSetupHtml`, `escHtml`, and the new dashboard `esc`.
+- [x] L5 boot-time warning when an `AGENTS_JSON` entry is dropped.
+- [x] Vitest coverage: `tests/securityHeaders.test.ts`,
+      `tests/adminDashboard.test.ts`. 80/80 green.
 
-- [ ] H1 trust proxy fix (`trustProxy: true`, doc the Railway assumption)
-- [ ] H2 background poller crash safety (top-level try/catch in
-      `runWithPayment`)
-- [ ] H3 security headers via `@fastify/helmet`
-- [ ] H4 refuse plaintext `SETUP_PASSWORD` in production, add `admin:hash`
-      script
-- [ ] M1 rate-limit bucket sweep / LRU
-- [ ] M2 cookie `SameSite=Lax`
-- [ ] M3 explicit CORS
-- [ ] M4 rate-limit basic-auth path
-- [ ] M5 pino redaction
-- [ ] M6 JSON Schema validation on body routes
-- [ ] L1 escape `'` in `escSetupHtml`
-- [ ] L5 reject empty normalized slugs
-- [ ] Vitest cases for each fix that is testable in CI
+Follow-ups deferred to a future PR (NOT blockers for merge):
+- [ ] M3 explicit CORS allowlist (do this once the dashboard's allowed
+      origins are pinned down).
+- [ ] M4 rate-limit + audit log on the basic-auth `/dashboard` path.
+- [ ] M6 Fastify JSON Schema validation on body routes — needs contract
+      testing before changing error response shapes Sokosumi/Masumi may
+      depend on.
 
 Out of scope for Phase 0: any DB migration, any UI redesign, any new route.
+(Phase 1 + Phase 2 partially shipped on the same branch — see below.)
 
 ## Phase 1 — Admin-issued login + Railway Postgres
 
@@ -57,34 +65,44 @@ Railway redeploys (no volume), which means **the admin DB resets on every
 deploy.** Today this is masked because the admin login also falls through to
 env-var credentials.
 
-Plan:
+Done in commit `7ebf0cb`:
+- [x] **Postgres adapter** behind the existing `database.ts` interface. The
+      module is a thin dispatcher: `DATABASE_URL` set → `databasePg.ts`,
+      otherwise `databaseSqlJs.ts`. Public exports
+      (`createUser`, `findUserByUsername`, `createSession`, etc.) unchanged.
+- [x] **Migration script** at `scripts/migrate-auth.mjs`. Run:
+      `npm run db:migrate-auth` (schema only) or
+      `npm run db:migrate-auth -- --copy-from-sqljs` to lift existing
+      `data/auth.db` rows into Postgres. Idempotent.
+- [x] **Admin-issues-credentials CLIs**:
+      - `npm run admin:create-user -- --username alice --display "Alice"`
+        prompts for a password, bcrypts (cost 12), inserts or rotates.
+      - `npm run admin:hash` prints a bcrypt hash for `SETUP_PASSWORD_HASH`.
 
-1. **Provision Railway Postgres plugin.** One click in the Railway project,
-   `DATABASE_URL` is injected automatically.
-2. **Add Postgres adapter** behind the existing `database.ts` interface. When
-   `DATABASE_URL` is set, use `pg`. Otherwise keep `sql.js` for local dev.
-   This is the boundary; no other code changes.
-3. **Migration script** (`scripts/migrate-auth.mjs`):
-   - On first run, create `users` + `sessions` tables.
-   - If `data/auth.db` exists locally, copy its rows over so dev → prod is
-     painless.
-4. **Admin issues credentials**, no self-signup:
-   - `npm run admin:create-user -- --username alice --display "Alice"`
-     prompts for a password, bcrypts it, inserts a row.
-   - Setup page shows the list of admins (read-only) and a "rotate password"
-     button that opens a CLI hint, not a form.
-5. **Keep the env-var `SETUP_USERNAME` / `SETUP_PASSWORD_HASH` as a
-   break-glass admin** — useful if the DB is empty after a fresh deploy. Plain
-   `SETUP_PASSWORD` rejected in production (per H4).
+Still pending — needs your hands, not code:
 
-Acceptance:
+1. **Provision the Railway Postgres plugin** on the project (one click).
+   `DATABASE_URL` lands in env automatically.
+2. **Run `npm run db:migrate-auth -- --copy-from-sqljs`** once locally (or
+   from a one-off Railway run) pointed at the new DB to lift any users +
+   sessions out of `data/auth.db`. Idempotent.
+3. **Issue first admin login**:
+   `npm run admin:create-user -- --username <you> --display "<name>"`.
+4. **(Optional)** Replace plaintext `SETUP_PASSWORD` with
+   `SETUP_PASSWORD_HASH` via `npm run admin:hash` to silence the production
+   readiness warning.
+5. **Setup page UI for listing admins** — read-only list of DB-backed admins
+   with a "rotate password" hint pointing at the CLI. Deferred to a small
+   follow-up commit; the CLI is already enough to operate.
+
+Acceptance for "done":
 - `psql $DATABASE_URL -c "select count(*) from users"` works.
 - Logging in with a DB-issued user creates a session row in Postgres.
 - Redeploying Railway does not log anyone out (session table survives).
 
-Risk: Postgres outage takes the dashboard offline. The MIP-003 paid path does
-not depend on the DB, so customer-facing functionality is unaffected. This is
-acceptable.
+Risk: Postgres outage takes the admin dashboard offline. The MIP-003 paid
+path does not depend on the DB, so customer-facing functionality is
+unaffected. Acceptable.
 
 ## Phase 2 — Read-only admin dashboard (`/admin`)
 
@@ -92,28 +110,40 @@ A new authenticated page at `/admin`, gated by the same session cookie. The
 existing `/setup` keeps working for config + sale registration; `/admin` is
 purely for *observing* live state.
 
-Initial widgets:
-- **Agents.** Each configured agent: slug, agentIdentifier, sellerVKey,
-  current pricing, "available" indicator (calls `/availability` internally).
-- **Recent jobs.** Last 50 from the in-memory store (Phase 3 promotes to
-  Postgres). Show: job_id, agent slug, status, on-chain state,
-  `awaiting_input` flag, age. Click a row → JSON detail drawer.
-- **Payment health.** One probe per minute against
-  `paymentServiceUrl/health` (or `/balance`), shown as a green/red dot.
-- **Audit log.** Last 50 admin actions (login, logout, sale registration,
-  setup edits). Sourced from Postgres `audit_log` table (new in Phase 1).
+v1 shipped in commit `51f4a47`:
 
-Explicitly not in scope for v1:
-- No write actions besides logout. Restarting jobs, refunding, etc., come
-  later or stay CLI-only.
-- No charts. Single-page dashboard, no real-time push, polls on a 5-second
-  interval.
+- [x] **Agents** card — each configured agent: slug, name, description,
+      `agentIdentifier`, `apiBaseUrl`, price tags. Handles the legacy
+      single-agent case (no `AGENTS_JSON`) as well.
+- [x] **Recent jobs** table — newest 50 from the in-memory store with
+      status badges, agent slug, started/finished relative timestamps,
+      job-id ellipsis on hover.
+- [x] **Payment health** card — probe of
+      `PAYMENT_SERVICE_URL/health` with a 30-second cache. Shows
+      reachable/HTTP status/latency, with an error message when
+      unreachable.
+- [x] **Overview cards** — totals for jobs, awaiting_payment,
+      awaiting_input, running, completed, failed/refunded.
+- [x] **Session-gated** with a 401 from `/admin/api/state` and a redirect
+      from `/admin`. Reuses the existing session cookie.
+- [x] **5-second polling** on `/admin/api/state` for live updates.
+- [x] **Style** matches the existing `/setup` palette and dark-mode rules.
+      No bundler. Single Fastify HTML response with inline CSS + JS.
 
-Style:
-- Same dark/light theme already in `/setup`.
-- No bundler. The page is one HTML response with inline `<style>` and
-  inline `<script>` (Fastify renders strings — no build step needed).
-- Use the `@fastify/static` plugin only if we need to ship icons.
+Out of scope for v1, deferred:
+- [ ] **Job detail drawer.** Click a row → JSON modal showing the full
+      `JobRecord`, with on-chain status and HITL history.
+- [ ] **Audit log.** Last 50 admin actions (login, logout, sale
+      registration, setup edits). Needs a new `audit_log` Postgres table
+      (Phase 3 territory).
+- [ ] **Refund / retry buttons.** Out of scope until the in-memory store is
+      replaced (Phase 3).
+- [ ] **`/availability` probe per agent** alongside the global payment
+      health probe — currently only the payment service is probed.
+
+Explicit non-goals (still):
+- No write actions besides logout.
+- No charts. Polling-based, no real-time push.
 
 ## Phase 3 — Durable job store on Postgres
 
