@@ -482,6 +482,7 @@ function redactConfigState(): Record<string, unknown> {
   return {
     ready: report.status === "ready",
     report,
+    networkDetails: report.networkDetails,
     setupAccessRequired: setupAccessConfigured(),
     accessMethods: {
       hash: Boolean(process.env.SETUP_ACCESS_TOKEN?.trim()),

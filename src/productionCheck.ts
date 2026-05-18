@@ -15,6 +15,10 @@ if (asJson) {
   console.log(`Production readiness: ${report.status}`);
   console.log(`Mode: ${report.mode}`);
   console.log(`Network: ${report.network}`);
+  console.log(
+    `Settlement: ${report.networkDetails.settlementToken} (${report.networkDetails.settlementUnit})`,
+  );
+  console.log(`Registry policy: ${report.networkDetails.registryPolicyId}`);
 
   if (report.issues.length === 0) {
     console.log("No readiness issues found.");
