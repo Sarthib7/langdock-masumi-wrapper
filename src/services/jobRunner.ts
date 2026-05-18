@@ -91,72 +91,95 @@ export function runWithPayment(
   },
 ): void {
   void (async () => {
-    const started = Date.now();
-    const { client, blockchainIdentifier } = ctx;
-
-    while (Date.now() - started < ctx.config.paymentPollTimeoutMs) {
-      try {
-        const { onChainState } = await client.getPaymentStatus(blockchainIdentifier);
-        if (paymentIsTerminal(onChainState)) {
-          setJobStatus(ctx.jobId, "refunded", {
-            error: `Payment terminated on-chain: ${onChainState}`,
-            failedAt: Date.now(),
-          });
-          return;
-        }
-        if (paymentIsLocked(onChainState)) {
-          break;
-        }
-      } catch (e) {
-        // Transient Payment Service error — log via job but keep polling.
-        setJobStatus(ctx.jobId, "awaiting_payment", {
-          error: `Payment poll error: ${handlerErrorMessage(e)}`,
-        });
-      }
-      await new Promise((r) => setTimeout(r, ctx.config.paymentPollIntervalMs));
-    }
-
-    // Re-check one final time before giving up.
-    let finalState: string | null = null;
     try {
-      finalState = (await client.getPaymentStatus(blockchainIdentifier)).onChainState;
-    } catch {
-      finalState = null;
-    }
-    if (!paymentIsLocked(finalState)) {
-      setJobStatus(ctx.jobId, "failed", {
-        error: `Timed out waiting for payment (last state: ${finalState ?? "unknown"})`,
-        failedAt: Date.now(),
-      });
-      return;
-    }
-
-    if (ctx.config.hitlChatMode) {
-      await startHitlChatJob({
-        jobId: ctx.jobId,
-        inputData: ctx.inputData,
-        config: ctx.config,
-      });
-      return;
-    }
-
-    setJobStatus(ctx.jobId, "running");
-    await runHandlerAndRecord(ctx);
-
-    // Submit output hash so the buyer can unlock funds.
-    const updated = (await import("./jobs.js")).getJob(ctx.jobId);
-    if (updated?.status === "completed" && updated.output_hash) {
-      const err = await submitResultHash(
-        client,
-        blockchainIdentifier,
-        updated.output_hash,
-      );
-      if (err) {
+      await runWithPaymentLoop(ctx);
+    } catch (e) {
+      // Last-ditch safety net so an unexpected throw in the poller never leaves
+      // the job stuck in "awaiting_payment" forever.
+      try {
         setJobStatus(ctx.jobId, "failed", {
-          error: `Failed to submit result hash on-chain: ${err}`,
+          error: `Payment poller crashed: ${handlerErrorMessage(e)}`,
           failedAt: Date.now(),
         });
+      } catch {
+        /* swallowed — job store unreachable */
       }
     }
   })();
+}
+
+async function runWithPaymentLoop(
+  ctx: RunContext & {
+    blockchainIdentifier: string;
+    client: MasumiPaymentClient;
+    config: AppConfig;
+  },
+): Promise<void> {
+  const started = Date.now();
+  const { client, blockchainIdentifier } = ctx;
+
+  while (Date.now() - started < ctx.config.paymentPollTimeoutMs) {
+    try {
+      const { onChainState } = await client.getPaymentStatus(blockchainIdentifier);
+      if (paymentIsTerminal(onChainState)) {
+        setJobStatus(ctx.jobId, "refunded", {
+          error: `Payment terminated on-chain: ${onChainState}`,
+          failedAt: Date.now(),
+        });
+        return;
+      }
+      if (paymentIsLocked(onChainState)) {
+        break;
+      }
+    } catch (e) {
+      // Transient Payment Service error — log via job but keep polling.
+      setJobStatus(ctx.jobId, "awaiting_payment", {
+        error: `Payment poll error: ${handlerErrorMessage(e)}`,
+      });
+    }
+    await new Promise((r) => setTimeout(r, ctx.config.paymentPollIntervalMs));
+  }
+
+  // Re-check one final time before giving up.
+  let finalState: string | null = null;
+  try {
+    finalState = (await client.getPaymentStatus(blockchainIdentifier)).onChainState;
+  } catch {
+    finalState = null;
+  }
+  if (!paymentIsLocked(finalState)) {
+    setJobStatus(ctx.jobId, "failed", {
+      error: `Timed out waiting for payment (last state: ${finalState ?? "unknown"})`,
+      failedAt: Date.now(),
+    });
+    return;
+  }
+
+  if (ctx.config.hitlChatMode) {
+    await startHitlChatJob({
+      jobId: ctx.jobId,
+      inputData: ctx.inputData,
+      config: ctx.config,
+    });
+    return;
+  }
+
+  setJobStatus(ctx.jobId, "running");
+  await runHandlerAndRecord(ctx);
+
+  // Submit output hash so the buyer can unlock funds.
+  const updated = (await import("./jobs.js")).getJob(ctx.jobId);
+  if (updated?.status === "completed" && updated.output_hash) {
+    const err = await submitResultHash(
+      client,
+      blockchainIdentifier,
+      updated.output_hash,
+    );
+    if (err) {
+      setJobStatus(ctx.jobId, "failed", {
+        error: `Failed to submit result hash on-chain: ${err}`,
+        failedAt: Date.now(),
+      });
+    }
+  }
 }

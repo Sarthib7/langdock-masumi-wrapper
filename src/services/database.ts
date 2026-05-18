@@ -1,110 +1,45 @@
 /**
- * SQLite database for user authentication and session management.
+ * Auth database dispatcher.
  *
- * Uses sql.js (WASM-based SQLite) — zero native compilation, works on any
- * platform including Alpine Docker images without Python/build-tools.
+ * Picks an adapter at first use:
+ * - `DATABASE_URL` set → Postgres adapter (Railway Postgres plugin, etc.).
+ * - otherwise → sql.js file adapter at `DB_PATH` or `data/auth.db`.
  *
- * The database is loaded from DB_PATH (default: data/auth.db) on first use
- * and auto-saved after every write operation.
+ * The public surface (functions exported below) is stable — handler code in
+ * `auth.ts`, `setup.ts`, and the test suite never sees which adapter is in
+ * use.
  */
 
-import initSqlJs, { type Database as SqlJsDatabase } from "sql.js";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
-import { createRequire } from "node:module";
-import path from "node:path";
+import type {
+  DatabaseAdapter,
+  SessionRow,
+  UserRow,
+  UserSummary,
+} from "./databaseTypes.js";
 
-let db: SqlJsDatabase | undefined;
-let dbPathValue: string;
-const requireFromHere = createRequire(import.meta.url);
+let adapter: DatabaseAdapter | undefined;
 
-function dbPath(): string {
-  return process.env.DB_PATH || path.join(process.cwd(), "data", "auth.db");
+function selectAdapterKind(): "postgres" | "sqljs" {
+  return process.env.DATABASE_URL?.trim() ? "postgres" : "sqljs";
 }
 
-async function loadDb(): Promise<SqlJsDatabase> {
-  if (db) return db;
-
-  dbPathValue = dbPath();
-  mkdirSync(path.dirname(dbPathValue), { recursive: true });
-
-  const SQL = await initSqlJs({
-    locateFile: (file: string) => {
-      // Resolve WASM binary relative to the installed sql.js package
-      try {
-        return requireFromHere.resolve(`sql.js/dist/${file}`);
-      } catch {
-        return file;
-      }
-    },
-  });
-
-  if (existsSync(dbPathValue)) {
-    const buffer = readFileSync(dbPathValue);
-    db = new SQL.Database(buffer);
+async function getAdapter(): Promise<DatabaseAdapter> {
+  if (adapter) return adapter;
+  const kind = selectAdapterKind();
+  if (kind === "postgres") {
+    const { createPgAdapter } = await import("./databasePg.js");
+    adapter = createPgAdapter(process.env.DATABASE_URL as string);
   } else {
-    db = new SQL.Database();
+    const { createSqlJsAdapter } = await import("./databaseSqlJs.js");
+    adapter = createSqlJsAdapter();
   }
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      username TEXT NOT NULL UNIQUE,
-      email TEXT,
-      password_hash TEXT NOT NULL,
-      display_name TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      token_hash TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      expires_at TEXT NOT NULL
-    );
-  `);
-
-  db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)`);
-
-  save();
-  return db;
+  return adapter;
 }
 
-function save(): void {
-  if (db && dbPathValue) {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    writeFileSync(dbPathValue, buffer, { mode: 0o600 });
-    chmodSync(dbPathValue, 0o600);
-  }
-}
+export type { UserRow, SessionRow } from "./databaseTypes.js";
 
-export interface UserRow {
-  id: string;
-  username: string;
-  email: string | null;
-  password_hash: string;
-  display_name: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface SessionRow {
-  id: string;
-  user_id: string;
-  token_hash: string;
-  created_at: string;
-  expires_at: string;
+export async function databaseKind(): Promise<DatabaseAdapter["kind"]> {
+  return (await getAdapter()).kind;
 }
 
 export async function createUser(
@@ -114,74 +49,23 @@ export async function createUser(
   email?: string,
   displayName?: string,
 ): Promise<UserRow> {
-  const database = await loadDb();
-  const now = new Date().toISOString();
-  database.run(
-    `INSERT INTO users (id, username, email, password_hash, display_name, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [id, username, email || null, passwordHash, displayName || null, now, now],
-  );
-  save();
-  return {
-    id,
-    username,
-    email: email || null,
-    password_hash: passwordHash,
-    display_name: displayName || null,
-    created_at: now,
-    updated_at: now,
-  };
+  return (await getAdapter()).createUser(id, username, passwordHash, email, displayName);
 }
 
 export async function findUserByUsername(username: string): Promise<UserRow | undefined> {
-  const database = await loadDb();
-  const stmt = database.prepare("SELECT * FROM users WHERE username = ?");
-  stmt.bind([username]);
-  try {
-    if (stmt.step()) {
-      return rowToUser(stmt);
-    }
-    return undefined;
-  } finally {
-    stmt.free();
-  }
+  return (await getAdapter()).findUserByUsername(username);
 }
 
 export async function findUserById(id: string): Promise<UserRow | undefined> {
-  const database = await loadDb();
-  const stmt = database.prepare("SELECT * FROM users WHERE id = ?");
-  stmt.bind([id]);
-  try {
-    if (stmt.step()) {
-      return rowToUser(stmt);
-    }
-    return undefined;
-  } finally {
-    stmt.free();
-  }
+  return (await getAdapter()).findUserById(id);
 }
 
-export async function listUsers(): Promise<Pick<UserRow, "id" | "username" | "email" | "display_name" | "created_at">[]> {
-  const database = await loadDb();
-  const stmt = database.prepare("SELECT id, username, email, display_name, created_at FROM users ORDER BY created_at");
-  const results: Pick<UserRow, "id" | "username" | "email" | "display_name" | "created_at">[] = [];
-  while (stmt.step()) {
-    const row: Record<string, unknown> = {};
-    const columns = stmt.getColumnNames();
-    const values = stmt.get();
-    columns.forEach((col, i) => { row[col] = values[i]; });
-    results.push(row as Pick<UserRow, "id" | "username" | "email" | "display_name" | "created_at">);
-  }
-  stmt.free();
-  return results;
+export async function listUsers(): Promise<UserSummary[]> {
+  return (await getAdapter()).listUsers();
 }
 
 export async function deleteUser(id: string): Promise<boolean> {
-  const database = await loadDb();
-  database.run("DELETE FROM sessions WHERE user_id = ?", [id]);
-  database.run("DELETE FROM users WHERE id = ?", [id]);
-  save();
-  return true;
+  return (await getAdapter()).deleteUser(id);
 }
 
 export async function createSession(
@@ -190,76 +74,41 @@ export async function createSession(
   tokenHash: string,
   expiresAt: Date,
 ): Promise<void> {
-  const database = await loadDb();
-  database.run(
-    `INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at)
-     VALUES (?, ?, ?, ?, ?)`,
-    [id, userId, tokenHash, new Date().toISOString(), expiresAt.toISOString()],
-  );
-  save();
+  return (await getAdapter()).createSession(id, userId, tokenHash, expiresAt);
 }
 
-export async function findSessionByTokenHash(tokenHash: string): Promise<SessionRow | undefined> {
-  const database = await loadDb();
-  const stmt = database.prepare("SELECT * FROM sessions WHERE token_hash = ? AND expires_at > ?");
-  stmt.bind([tokenHash, new Date().toISOString()]);
-  try {
-    if (stmt.step()) {
-      return rowToSession(stmt);
-    }
-    return undefined;
-  } finally {
-    stmt.free();
-  }
+export async function findSessionByTokenHash(
+  tokenHash: string,
+): Promise<SessionRow | undefined> {
+  return (await getAdapter()).findSessionByTokenHash(tokenHash);
 }
 
 export async function deleteSession(id: string): Promise<void> {
-  const database = await loadDb();
-  database.run("DELETE FROM sessions WHERE id = ?", [id]);
-  save();
+  return (await getAdapter()).deleteSession(id);
 }
 
 export async function deleteExpiredSessions(): Promise<number> {
-  const database = await loadDb();
-  database.run("DELETE FROM sessions WHERE expires_at <= ?", [new Date().toISOString()]);
-  save();
-  return 0;
+  return (await getAdapter()).deleteExpiredSessions();
 }
 
 export async function deleteUserSessions(userId: string): Promise<void> {
-  const database = await loadDb();
-  database.run("DELETE FROM sessions WHERE user_id = ?", [userId]);
-  save();
+  return (await getAdapter()).deleteUserSessions(userId);
 }
 
-/** Close the database connection. Used in tests. */
-export function closeDb(): void {
-  if (db) {
-    save();
-    db.close();
-    db = undefined;
+/** Close the database connection. Used in tests and on graceful shutdown. */
+export async function closeDb(): Promise<void> {
+  if (adapter) {
+    await adapter.close();
+    adapter = undefined;
   }
 }
 
-/** Reset the database module state. Used in tests. */
+/** Reset the dispatcher state. Used between test cases. */
 export function resetDb(): void {
-  closeDb();
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────
-
-function rowToUser(stmt: import("sql.js").Statement): UserRow {
-  const columns = stmt.getColumnNames();
-  const values = stmt.get();
-  const row: Record<string, unknown> = {};
-  columns.forEach((col, i) => { row[col] = values[i]; });
-  return row as unknown as UserRow;
-}
-
-function rowToSession(stmt: import("sql.js").Statement): SessionRow {
-  const columns = stmt.getColumnNames();
-  const values = stmt.get();
-  const row: Record<string, unknown> = {};
-  columns.forEach((col, i) => { row[col] = values[i]; });
-  return row as unknown as SessionRow;
+  // Fire-and-forget close to keep the API synchronous for existing tests;
+  // sql.js close is sync and Postgres close happens out-of-band.
+  if (adapter) {
+    void adapter.close();
+    adapter = undefined;
+  }
 }

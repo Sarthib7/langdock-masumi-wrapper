@@ -12,6 +12,27 @@ type Bucket = {
 };
 
 const buckets = new Map<string, Bucket>();
+const MAX_BUCKETS = 10_000;
+let lastSweep = 0;
+const SWEEP_INTERVAL_MS = 30_000;
+
+function sweepExpired(now: number): void {
+  if (now - lastSweep < SWEEP_INTERVAL_MS && buckets.size < MAX_BUCKETS) return;
+  for (const [key, bucket] of buckets) {
+    if (bucket.resetAt <= now) buckets.delete(key);
+  }
+  // Hard cap: if the map is still over budget, drop the oldest entries.
+  if (buckets.size > MAX_BUCKETS) {
+    const overflow = buckets.size - MAX_BUCKETS;
+    let dropped = 0;
+    for (const key of buckets.keys()) {
+      if (dropped >= overflow) break;
+      buckets.delete(key);
+      dropped += 1;
+    }
+  }
+  lastSweep = now;
+}
 
 export function checkRateLimit(args: {
   scope: string;
@@ -20,6 +41,7 @@ export function checkRateLimit(args: {
   windowMs: number;
 }): RateLimitResult {
   const now = Date.now();
+  sweepExpired(now);
   const key = `${args.scope}:${args.identifier}`;
   const existing = buckets.get(key);
   const bucket =

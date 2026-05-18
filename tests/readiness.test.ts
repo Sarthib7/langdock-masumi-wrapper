@@ -8,6 +8,7 @@ import {
 } from "../src/services/readiness.js";
 import {
   MAINNET_USDCX_UNIT,
+  MAINNET_USDM_UNIT,
   PREPROD_TUSDM_UNIT,
 } from "../src/services/sokosumiTokens.js";
 
@@ -35,6 +36,10 @@ function resetEnv(): void {
   delete process.env.SETUP_USERNAME;
   delete process.env.SETUP_PASSWORD_HASH;
   delete process.env.SETUP_PASSWORD;
+  delete process.env.DATABASE_URL;
+  delete process.env.DATABASE_SSL;
+  delete process.env.DB_PATH;
+  delete process.env.REGISTRY_AGENT_API_BASE_URL;
 }
 
 function setAdminEnv(): void {
@@ -121,6 +126,25 @@ describe("getReadinessReport", () => {
     const report = getReadinessReport(loadConfig());
     expect(report.status).toBe("ready");
     expect(report.issues).toEqual([]);
+  });
+
+  it("accepts database-backed admin auth configuration with an explicit warning", () => {
+    resetEnv();
+    process.env.PAYMENT_MODE = "direct";
+    process.env.LANGDOCK_API_KEY = "ld-key";
+    process.env.LANGDOCK_AGENT_ID = "agent-id";
+    process.env.DATABASE_URL = "postgres://user:pass@example.com:5432/app";
+    process.env.PRICE_AMOUNTS = JSON.stringify([
+      { amount: "1000000", unit: PREPROD_TUSDM_UNIT },
+    ]);
+
+    const report = getReadinessReport(loadConfig());
+    expect(report.status).toBe("ready");
+    expect(report.issues).toContainEqual(
+      expect.objectContaining({
+        code: "database_admin_user_unverified",
+      }),
+    );
   });
 
   it("requires Masumi identity and payment-service credentials in masumi mode", () => {
@@ -305,12 +329,40 @@ describe("getReadinessReport", () => {
 
     const report = getReadinessReport(loadConfig());
     expect(report.status).toBe("ready");
+    expect(report.networkDetails).toMatchObject({
+      settlementToken: "USDCx",
+      settlementUnit: MAINNET_USDCX_UNIT,
+      registryPolicyId: "6323eccc89e311315a59f511e45c85fe48a7d14da743030707d42adf",
+      paymentContractAddress: "addr1wyv9sc853kpurfdqv5f02tmmlscez20ks0p5p6aj76j0xac365skm",
+    });
     expect(report.issues).not.toContainEqual(
       expect.objectContaining({ code: "non_sokosumi_settlement_unit" }),
     );
   });
 
-  it("warns when mainnet pricing is not USDCx", () => {
+  it("accepts the Mainnet USDM asset id still referenced by the Sokosumi listing guide", () => {
+    resetEnv();
+    process.env.PAYMENT_MODE = "masumi";
+    process.env.NETWORK = "Mainnet";
+    process.env.LANGDOCK_API_KEY = "ld-key";
+    process.env.LANGDOCK_AGENT_ID = "agent-id";
+    setAdminEnv();
+    process.env.AGENT_IDENTIFIER = "agent-id-on-chain";
+    process.env.SELLER_VKEY = "seller-vkey";
+    process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
+    process.env.PAYMENT_API_KEY = "payment-token";
+    process.env.PRICE_AMOUNTS = JSON.stringify([
+      { amount: "1000000", unit: MAINNET_USDM_UNIT },
+    ]);
+
+    const report = getReadinessReport(loadConfig());
+    expect(report.status).toBe("ready");
+    expect(report.issues).not.toContainEqual(
+      expect.objectContaining({ code: "non_sokosumi_settlement_unit" }),
+    );
+  });
+
+  it("warns when mainnet pricing is not a known Mainnet settlement unit", () => {
     resetEnv();
     process.env.PAYMENT_MODE = "masumi";
     process.env.NETWORK = "Mainnet";
@@ -331,7 +383,84 @@ describe("getReadinessReport", () => {
       expect.objectContaining({
         code: "non_sokosumi_settlement_unit",
         message:
-          "Sokosumi mainnet listings are expected to settle in USDCx; use the full USDCx asset id as unit, not lovelace.",
+          "Mainnet pricing should use a known Masumi settlement asset id. Current token docs identify USDCx as active; the Sokosumi listing guide also references the legacy USDM asset id. Do not use lovelace for stablecoin pricing.",
+      }),
+    );
+  });
+
+  it("rejects Mainnet direct mode even outside production", () => {
+    resetEnv();
+    process.env.PAYMENT_MODE = "direct";
+    process.env.NETWORK = "Mainnet";
+    process.env.LANGDOCK_API_KEY = "ld-key";
+    process.env.LANGDOCK_AGENT_ID = "agent-id";
+    setAdminEnv();
+    process.env.PRICE_AMOUNTS = JSON.stringify([
+      { amount: "1000000", unit: MAINNET_USDCX_UNIT },
+    ]);
+
+    const report = getReadinessReport(loadConfig());
+    expect(report.status).toBe("not_ready");
+    expect(report.issues).toContainEqual(
+      expect.objectContaining({
+        code: "mainnet_requires_masumi_mode",
+      }),
+    );
+  });
+
+  it("rejects localhost public URLs in Mainnet mode", () => {
+    resetEnv();
+    process.env.PAYMENT_MODE = "masumi";
+    process.env.NETWORK = "Mainnet";
+    process.env.LANGDOCK_API_KEY = "ld-key";
+    process.env.LANGDOCK_AGENT_ID = "agent-id";
+    setAdminEnv();
+    process.env.AGENT_IDENTIFIER = "agent-id-on-chain";
+    process.env.SELLER_VKEY = "seller-vkey";
+    process.env.PAYMENT_SERVICE_URL = "http://localhost:3001/api/v1";
+    process.env.PAYMENT_API_KEY = "payment-token";
+    process.env.REGISTRY_AGENT_API_BASE_URL = "https://localhost/agents/mainnet";
+    process.env.PRICE_AMOUNTS = JSON.stringify([
+      { amount: "1000000", unit: MAINNET_USDCX_UNIT },
+    ]);
+
+    const report = getReadinessReport(loadConfig());
+    expect(report.status).toBe("not_ready");
+    expect(report.issues).toContainEqual(
+      expect.objectContaining({
+        code: "mainnet_local_url",
+        env: ["PAYMENT_SERVICE_URL"],
+      }),
+    );
+    expect(report.issues).toContainEqual(
+      expect.objectContaining({
+        code: "mainnet_local_url",
+        env: ["REGISTRY_AGENT_API_BASE_URL"],
+      }),
+    );
+  });
+
+  it("rejects plaintext admin passwords for production Mainnet", () => {
+    resetEnv();
+    process.env.NODE_ENV = "production";
+    process.env.PAYMENT_MODE = "masumi";
+    process.env.NETWORK = "Mainnet";
+    process.env.LANGDOCK_API_KEY = "ld-key";
+    process.env.LANGDOCK_AGENT_ID = "agent-id";
+    setPlainAdminEnv();
+    process.env.AGENT_IDENTIFIER = "agent-id-on-chain";
+    process.env.SELLER_VKEY = "seller-vkey";
+    process.env.PAYMENT_SERVICE_URL = "https://payment.example.com/api/v1";
+    process.env.PAYMENT_API_KEY = "payment-token";
+    process.env.PRICE_AMOUNTS = JSON.stringify([
+      { amount: "1000000", unit: MAINNET_USDCX_UNIT },
+    ]);
+
+    const report = getReadinessReport(loadConfig());
+    expect(report.status).toBe("not_ready");
+    expect(report.issues).toContainEqual(
+      expect.objectContaining({
+        code: "mainnet_plaintext_admin_password",
       }),
     );
   });

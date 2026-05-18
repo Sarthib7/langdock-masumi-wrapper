@@ -14,6 +14,7 @@ Detailed wiring audit: [AUDIT.md](AUDIT.md).
 | MIP-003 `/status` | Done | Returns `job_id`, `status`, `result`/`output`, `input_hash`, `output_hash`, `blockchain_identifier`, ISO timestamps. |
 | MIP-003 `/availability` | Done | Returns `{status, type, message}`. Custom handler supported. |
 | Operator `/ready` | Done | Central readiness report for required Langdock/Masumi env, pricing, schema, and payment windows. |
+| Operator login | Done | Supports database-backed admin users plus env fallback credentials; browser registration is disabled. |
 | MIP-003 `/input_schema` | Done | Served from `INPUT_SCHEMA_PATH` / `INPUT_SCHEMA_JSON` or a default `text` field. |
 | MIP-003 `/provide_input` (HITL) | Done | Optional Langdock chat mode via `HITL_CHAT_MODE=true`; jobs return `awaiting_input` after each answer until user sends `DONE`. |
 | MIP-004 input hashing | Done | JCS + SHA-256 over the canonical `{key, value}` array form. |
@@ -106,16 +107,17 @@ HITL chat mode (`HITL_CHAT_MODE=true`)
 1. **Register the agent on Masumi.** From the admin dashboard, create the selling wallet
    and call `POST /api/v1/registry/` to mint the agent NFT. Copy the resulting
    `agentIdentifier` and `sellerVKey` into `AGENT_IDENTIFIER` / `SELLER_VKEY`.
-2. **Set real pricing in Masumi SaaS/admin.** Leave `PRICE_AMOUNTS` empty for fixed registered pricing; only set it when this wrapper must send dynamic `RequestedFunds`. Sokosumi expects 6-decimal raw token amounts with the token asset id as `unit`, not `lovelace`.
+2. **Set real pricing in Masumi SaaS/admin.** Leave `PRICE_AMOUNTS` empty for fixed registered pricing; only set it when this wrapper must send dynamic `RequestedFunds`. Sokosumi expects 6-decimal raw token amounts with the token asset id as `unit`, not `lovelace`. Preprod uses tUSDM. Mainnet should be verified against the target Payment Service/Sokosumi environment because current official docs reference USDCx in token docs and USDM in the Sokosumi listing guide.
 3. **Provide a real `INPUT_SCHEMA_JSON`** that matches what the Langdock agent expects — this is
    what Sokosumi shows buyers.
 4. **Run the Masumi Payment Service node** alongside the wrapper (separate process, shared env).
 5. **Preprod dry run.** Fund the purchasing wallet via the faucet, execute a real end-to-end
    buy → result → unlock cycle before switching `NETWORK` to `Mainnet`.
-6. **Durable job store.** Current implementation is in-memory — fine for single-replica, but
+6. **Mainnet auth hardening.** Use Postgres admin users or `SETUP_PASSWORD_HASH`, set `PAYMENT_MODE=masumi`, avoid localhost URLs, and enable `REQUIRE_PRODUCTION_CONFIG=true`.
+7. **Durable job store.** Current implementation is in-memory — fine for single-replica, but
    for HA swap `src/services/jobs.ts` for Redis or Postgres.
-7. **Durable HITL state.** Current continuous chat history is in-memory; use Redis/Postgres before running multiple replicas or restarting during active chats.
-8. **Observability.** Fastify logger is on; add Prometheus metrics + tracing once this is
+8. **Durable HITL state.** Current continuous chat history is in-memory; use Redis/Postgres before running multiple replicas or restarting during active chats.
+9. **Observability.** Fastify logger is on; add Prometheus metrics + tracing once this is
    deployed behind a real ingress.
 
 ## How to Test Locally

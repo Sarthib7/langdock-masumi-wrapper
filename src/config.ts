@@ -237,7 +237,24 @@ function parseAgentProfiles(
       typeof record.langdockAgentId === "string"
         ? record.langdockAgentId.trim()
         : "";
-    if (!slug || seen.has(slug) || !langdockAgentId) continue;
+    if (!slug) {
+      console.warn(
+        `[config] AGENTS_JSON entry dropped: slug "${rawSlug}" is empty after normalization`,
+      );
+      continue;
+    }
+    if (seen.has(slug)) {
+      console.warn(
+        `[config] AGENTS_JSON entry dropped: duplicate slug "${slug}"`,
+      );
+      continue;
+    }
+    if (!langdockAgentId) {
+      console.warn(
+        `[config] AGENTS_JSON entry dropped: agent "${slug}" is missing langdockAgentId`,
+      );
+      continue;
+    }
     seen.add(slug);
 
     const priceAmounts = parsePriceAmountsValue(record.priceAmounts);

@@ -55,8 +55,13 @@ export {
   type ReadinessSeverity,
 } from "./services/readiness.js";
 export {
+  MAINNET_SETTLEMENT_UNITS,
   MAINNET_USDCX_UNIT,
+  MAINNET_USDM_UNIT,
+  MASUMI_NETWORK_DETAILS,
   PREPROD_TUSDM_UNIT,
+  masumiNetworkDetails,
+  type MasumiNetworkDetails,
 } from "./services/sokosumiTokens.js";
 export type {
   InputDataItem,

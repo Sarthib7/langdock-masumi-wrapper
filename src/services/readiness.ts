@@ -11,7 +11,13 @@ import type {
   InputSchemaField,
   PriceAmount,
 } from "../config.js";
-import { MAINNET_USDCX_UNIT, PREPROD_TUSDM_UNIT } from "./sokosumiTokens.js";
+import {
+  MAINNET_USDCX_UNIT,
+  MAINNET_USDM_UNIT,
+  PREPROD_TUSDM_UNIT,
+  masumiNetworkDetails,
+  type MasumiNetworkDetails,
+} from "./sokosumiTokens.js";
 
 export type ReadinessSeverity = "error" | "warning";
 
@@ -26,6 +32,7 @@ export type ReadinessReport = {
   status: "ready" | "not_ready";
   mode: AppConfig["paymentMode"];
   network: AppConfig["masumiNetwork"];
+  networkDetails: MasumiNetworkDetails;
   issues: ReadinessIssue[];
   requiredEnv: string[];
   optionalEnv: string[];
@@ -73,6 +80,15 @@ function isLocalHttpUrl(value: string): boolean {
   }
 }
 
+function isLocalUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function validateHttpsUnlessLocal(
   value: string,
   env: string[],
@@ -96,6 +112,90 @@ function setupAdminCredentialsConfigured(): boolean {
       (hasValue(rawEnv("SETUP_PASSWORD_HASH")) ||
         hasValue(rawEnv("SETUP_PASSWORD"))),
   );
+}
+
+function databaseAdminStoreConfigured(): boolean {
+  return hasValue(rawEnv("DATABASE_URL")) || hasValue(rawEnv("DB_PATH"));
+}
+
+function validateSetupAccessToken(issues: ReadinessIssue[]): void {
+  const token = rawEnv("SETUP_ACCESS_TOKEN").trim();
+  if (!token || token.length >= 32) return;
+  issues.push({
+    severity: "warning",
+    code: "weak_setup_access_token",
+    env: ["SETUP_ACCESS_TOKEN"],
+    message:
+      "SETUP_ACCESS_TOKEN should be at least 32 random characters if enabled.",
+  });
+}
+
+function validateMainnetSafety(
+  config: AppConfig,
+  issues: ReadinessIssue[],
+): void {
+  if (config.masumiNetwork !== "Mainnet") return;
+
+  if (config.paymentMode !== "masumi") {
+    issues.push({
+      severity: "error",
+      code: "mainnet_requires_masumi_mode",
+      env: ["NETWORK", "PAYMENT_MODE"],
+      message: "NETWORK=Mainnet requires PAYMENT_MODE=masumi.",
+    });
+  }
+
+  if (
+    process.env.NODE_ENV === "production" &&
+    !hasValue(rawEnv("SETUP_PASSWORD_HASH")) &&
+    hasValue(rawEnv("SETUP_PASSWORD"))
+  ) {
+    issues.push({
+      severity: "error",
+      code: "mainnet_plaintext_admin_password",
+      env: ["SETUP_PASSWORD", "SETUP_PASSWORD_HASH"],
+      message:
+        "Mainnet production deployments must use SETUP_PASSWORD_HASH instead of plaintext SETUP_PASSWORD.",
+    });
+  }
+
+  const publicUrls: Array<{ env: string[]; value: string }> = [
+    { env: ["LANGDOCK_BASE_URL"], value: config.langdockBaseUrl },
+    { env: ["PAYMENT_SERVICE_URL"], value: config.paymentServiceUrl },
+    {
+      env: ["REGISTRY_AGENT_API_BASE_URL"],
+      value: rawEnv("REGISTRY_AGENT_API_BASE_URL"),
+    },
+    ...config.agents.map((agent) => ({
+      env: ["AGENTS_JSON"],
+      value: agent.apiBaseUrl,
+    })),
+  ];
+
+  for (const item of publicUrls) {
+    if (!hasValue(item.value) || !isHttpUrl(item.value) || !isLocalUrl(item.value)) {
+      continue;
+    }
+    issues.push({
+      severity: "error",
+      code: "mainnet_local_url",
+      env: item.env,
+      message: `${item.env.join(" or ")} must not point at localhost when NETWORK=Mainnet.`,
+    });
+  }
+
+  if (
+    process.env.REQUIRE_PRODUCTION_CONFIG !== "true" &&
+    process.env.NODE_ENV === "production"
+  ) {
+    issues.push({
+      severity: "warning",
+      code: "mainnet_startup_check_not_enforced",
+      env: ["REQUIRE_PRODUCTION_CONFIG"],
+      message:
+        "Set REQUIRE_PRODUCTION_CONFIG=true for Mainnet so startup refuses incomplete paid-job configuration.",
+    });
+  }
 }
 
 function validatePaymentWindows(
@@ -249,9 +349,13 @@ function validatePriceAmounts(
     }
   }
 
-  const expectedUnit =
-    network === "Mainnet" ? MAINNET_USDCX_UNIT : PREPROD_TUSDM_UNIT;
-  const hasSokosumiUnit = amounts.some((amount) => amount.unit === expectedUnit);
+  const expectedUnits =
+    network === "Mainnet"
+      ? [MAINNET_USDCX_UNIT, MAINNET_USDM_UNIT]
+      : [PREPROD_TUSDM_UNIT];
+  const hasSokosumiUnit = amounts.some((amount) =>
+    expectedUnits.includes(amount.unit),
+  );
   if (!hasSokosumiUnit) {
     issues.push({
       severity: "warning",
@@ -259,7 +363,7 @@ function validatePriceAmounts(
       env: ["PRICE_AMOUNTS"],
       message:
         network === "Mainnet"
-          ? "Sokosumi mainnet listings are expected to settle in USDCx; use the full USDCx asset id as unit, not lovelace."
+          ? "Mainnet pricing should use a known Masumi settlement asset id. Current token docs identify USDCx as active; the Sokosumi listing guide also references the legacy USDM asset id. Do not use lovelace for stablecoin pricing."
           : "Sokosumi Preprod listings are expected to settle in tUSDM; use the full tUSDM asset id as unit, not lovelace.",
     });
   }
@@ -356,8 +460,7 @@ export function productionRequiredEnv(config: AppConfig): string[] {
     "LANGDOCK_API_KEY",
     "LANGDOCK_AGENT_ID or AGENTS_JSON[].langdockAgentId",
     "PAYMENT_MODE",
-    "SETUP_USERNAME",
-    "SETUP_PASSWORD_HASH or SETUP_PASSWORD",
+    "SETUP_USERNAME + SETUP_PASSWORD_HASH or database admin user",
     "INPUT_SCHEMA_JSON or INPUT_SCHEMA_PATH",
   ];
   if (config.paymentMode === "masumi") {
@@ -401,13 +504,36 @@ export function getReadinessReport(config: AppConfig): ReadinessReport {
   }
   validateHttpsUnlessLocal(config.langdockBaseUrl, ["LANGDOCK_BASE_URL"], issues);
 
-  if (!setupAdminCredentialsConfigured()) {
+  if (!setupAdminCredentialsConfigured() && !databaseAdminStoreConfigured()) {
     pushMissing(
       issues,
-      ["SETUP_USERNAME", "SETUP_PASSWORD_HASH or SETUP_PASSWORD"],
-      "Admin login credentials must be configured on the server because browser registration is disabled.",
+      ["SETUP_USERNAME", "SETUP_PASSWORD_HASH or SETUP_PASSWORD", "DATABASE_URL"],
+      "Admin login must be configured on the server. Set SETUP_USERNAME with SETUP_PASSWORD_HASH, or create a database admin user with `npm run admin:create-user` and configure DATABASE_URL.",
     );
+  } else if (!setupAdminCredentialsConfigured() && databaseAdminStoreConfigured()) {
+    issues.push({
+      severity: "warning",
+      code: "database_admin_user_unverified",
+      env: ["DATABASE_URL", "DB_PATH"],
+      message:
+        "Readiness sees a database-backed auth store but cannot verify synchronously that an admin user exists. Run `npm run admin:create-user` before launch.",
+    });
+  } else if (
+    process.env.NODE_ENV === "production" &&
+    config.masumiNetwork !== "Mainnet" &&
+    !hasValue(rawEnv("SETUP_PASSWORD_HASH")) &&
+    hasValue(rawEnv("SETUP_PASSWORD"))
+  ) {
+    issues.push({
+      severity: "warning",
+      code: "plaintext_admin_password",
+      env: ["SETUP_PASSWORD", "SETUP_PASSWORD_HASH"],
+      message:
+        "Production deployment is using a plaintext SETUP_PASSWORD. Generate a bcrypt hash with `npm run admin:hash` and set SETUP_PASSWORD_HASH instead so the env var does not show plaintext in logs or Railway settings.",
+    });
   }
+
+  validateSetupAccessToken(issues);
 
   if (config.paymentMode === "direct" && process.env.NODE_ENV === "production") {
     issues.push({
@@ -472,6 +598,7 @@ export function getReadinessReport(config: AppConfig): ReadinessReport {
   }
 
   validateMasumiEnvSyntax(config, issues);
+  validateMainnetSafety(config, issues);
   validatePaymentWindows(config, issues);
   validatePriceAmounts(config.priceAmounts, config.masumiNetwork, issues);
   validateInputSchema(config.inputSchema, issues);
@@ -481,6 +608,7 @@ export function getReadinessReport(config: AppConfig): ReadinessReport {
     status: hasErrors ? "not_ready" : "ready",
     mode: config.paymentMode,
     network: config.masumiNetwork,
+    networkDetails: masumiNetworkDetails(config.masumiNetwork),
     issues,
     requiredEnv: productionRequiredEnv(config),
     optionalEnv: [

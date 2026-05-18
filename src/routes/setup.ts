@@ -482,6 +482,7 @@ function redactConfigState(): Record<string, unknown> {
   return {
     ready: report.status === "ready",
     report,
+    networkDetails: report.networkDetails,
     setupAccessRequired: setupAccessConfigured(),
     accessMethods: {
       hash: Boolean(process.env.SETUP_ACCESS_TOKEN?.trim()),
@@ -755,6 +756,7 @@ async function persistAgentIdentifier(agentIdentifier: string): Promise<void> {
 function setupHtml(user?: AuthenticatedUser | null): string {
   const userBadge = user
     ? `<div class="user-badge">
+        <a href="/admin" class="logout-btn secondary" style="text-decoration:none;display:inline-flex;align-items:center;">Operator dashboard</a>
         <span class="user-avatar" aria-hidden="true">${escSetupHtml((user.displayName || user.username).charAt(0).toUpperCase())}</span>
         <span class="user-name">${escSetupHtml(user.displayName || user.username)}</span>
         <button type="button" id="logoutButton" class="logout-btn secondary">Sign out</button>
@@ -1410,14 +1412,14 @@ function setupHtml(user?: AuthenticatedUser | null): string {
           </div>
           <div class="notice">
             <strong>Production safety:</strong>
-            <span>Set <code>SETUP_USERNAME</code> with either <code>SETUP_PASSWORD</code> or <code>SETUP_PASSWORD_HASH</code>. Secrets entered here are not echoed back by the dashboard.</span>
+            <span>Use a database admin user for hosted deployments, or set <code>SETUP_USERNAME</code> with <code>SETUP_PASSWORD_HASH</code> as an env fallback. Secrets entered here are not echoed back by the dashboard.</span>
           </div>
           <details class="setup-guide">
             <summary>Credential guide</summary>
             <dl>
               <div>
                 <dt>Admin login</dt>
-                <dd>Protects this setup page. Set <code>SETUP_USERNAME</code> and either <code>SETUP_PASSWORD</code> or <code>SETUP_PASSWORD_HASH</code>. <a href="https://docs.railway.com/variables" target="_blank" rel="noreferrer">Railway variables</a></dd>
+                <dd>Protects this setup page. Create a database user with <code>npm run admin:create-user</code>, or set <code>SETUP_USERNAME</code> and <code>SETUP_PASSWORD_HASH</code>. <a href="https://docs.railway.com/variables" target="_blank" rel="noreferrer">Railway variables</a></dd>
               </div>
               <div>
                 <dt>Langdock API key and Agent ID</dt>
@@ -2258,7 +2260,7 @@ function setSessionCookie(reply: import("fastify").FastifyReply, token: string):
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   reply.header(
     "set-cookie",
-    `session=${encodeURIComponent(token)}; Path=/; Max-Age=86400; SameSite=Strict; HttpOnly${secure}`,
+    `session=${encodeURIComponent(token)}; Path=/; Max-Age=86400; SameSite=Lax; HttpOnly${secure}`,
   );
 }
 
@@ -2284,7 +2286,8 @@ function escSetupHtml(s: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
@@ -2345,7 +2348,7 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
 
     const loginResult = await loginAdmin(username, password);
     if ("error" in loginResult) {
-      return reply.status(adminCredentialsConfigured() ? 401 : 503).send({
+      return reply.status(loginResult.credentialsConfigured ? 401 : 503).send({
         error: "LOGIN_FAILED",
         message: loginResult.error,
       });
@@ -2358,8 +2361,12 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
     if (rejectCrossOriginPost(request, reply)) return;
     const token = sessionTokenFromRequest(request);
     if (token) await logoutUser(token);
+    const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
     return reply
-      .header("set-cookie", "session=; path=/; max-age=0; SameSite=Strict")
+      .header(
+        "set-cookie",
+        `session=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly${secure}`,
+      )
       .send({ ok: true });
   });
 
