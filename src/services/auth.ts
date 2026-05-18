@@ -11,6 +11,10 @@ import {
   deleteUserSessions,
   deleteSession,
   deleteExpiredSessions,
+  findUserById,
+  findUserByUsername,
+  listUsers,
+  type UserRow,
 } from "./database.js";
 import {
   constantTimeEqual,
@@ -21,6 +25,8 @@ import {
 const BCRYPT_ROUNDS = 12;
 const SESSION_DURATION_HOURS = 24;
 const ADMIN_SESSION_USER_ID = "setup-admin";
+const DUMMY_BCRYPT_HASH =
+  "$2b$12$abcdefghijklmnopqrstuuK7r2cFOP7JPrbMV7xYUq/xp1n0JRXD6";
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, BCRYPT_ROUNDS);
@@ -43,6 +49,15 @@ export interface AuthenticatedUser {
   displayName: string | null;
   email: string | null;
 }
+
+type DatabaseCredentialCheck =
+  | { status: "authenticated"; user: AuthenticatedUser }
+  | { status: "invalid" }
+  | { status: "not_found" };
+
+type LoginResult =
+  | { user: AuthenticatedUser; token: string }
+  | { error: string; credentialsConfigured: boolean };
 
 function configuredAdminUsername(): string {
   return process.env.SETUP_USERNAME?.trim() ?? "";
@@ -73,7 +88,44 @@ function configuredAdminUser(): AuthenticatedUser {
   };
 }
 
-export async function verifyAdminCredentials(
+function userRowToAuthenticatedUser(row: UserRow): AuthenticatedUser {
+  return {
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name,
+    email: row.email,
+  };
+}
+
+async function databaseHasUsers(): Promise<boolean> {
+  return (await listUsers()).length > 0;
+}
+
+async function verifyDatabaseCredentials(
+  username: string,
+  password: string,
+): Promise<DatabaseCredentialCheck> {
+  const normalizedUsername = username.trim();
+  if (!normalizedUsername) return { status: "not_found" };
+
+  const user = await findUserByUsername(normalizedUsername);
+  if (!user) {
+    // Keep bcrypt timing broadly similar for unknown users.
+    await verifyPassword(password || "missing-password", DUMMY_BCRYPT_HASH);
+    return { status: "not_found" };
+  }
+
+  if (!(await verifyPassword(password, user.password_hash))) {
+    return { status: "invalid" };
+  }
+
+  return {
+    status: "authenticated",
+    user: userRowToAuthenticatedUser(user),
+  };
+}
+
+async function verifyConfiguredAdminCredentials(
   username: string,
   password: string,
 ): Promise<boolean> {
@@ -91,30 +143,67 @@ export async function verifyAdminCredentials(
   return constantTimeEqual(password, passwordPlaintext);
 }
 
+export async function verifyAdminCredentials(
+  username: string,
+  password: string,
+): Promise<boolean> {
+  const dbCheck = await verifyDatabaseCredentials(username, password);
+  if (dbCheck.status === "authenticated") return true;
+  if (dbCheck.status === "invalid") return false;
+
+  return verifyConfiguredAdminCredentials(username, password);
+}
+
 export async function loginAdmin(
   username: string,
   password: string,
-): Promise<{ user: AuthenticatedUser; token: string } | { error: string }> {
-  if (!adminCredentialsConfigured()) {
+): Promise<LoginResult> {
+  const dbCheck = await verifyDatabaseCredentials(username, password);
+  if (dbCheck.status === "authenticated") {
+    const { token } = await createSessionForUser(dbCheck.user.id);
     return {
-      error:
-        "Admin credentials are not configured. Set SETUP_USERNAME and SETUP_PASSWORD_HASH or SETUP_PASSWORD.",
+      user: dbCheck.user,
+      token,
+    };
+  }
+  if (dbCheck.status === "invalid") {
+    return {
+      error: "Invalid username or password.",
+      credentialsConfigured: true,
     };
   }
 
-  if (!(await verifyAdminCredentials(username, password))) {
-    return { error: "Invalid username or password." };
+  if (adminCredentialsConfigured()) {
+    if (!(await verifyConfiguredAdminCredentials(username, password))) {
+      return {
+        error: "Invalid username or password.",
+        credentialsConfigured: true,
+      };
+    }
+
+    const { token } = await createSessionForUser(ADMIN_SESSION_USER_ID);
+
+    return {
+      user: configuredAdminUser(),
+      token,
+    };
   }
 
-  const { token } = await createSessionForAdmin();
+  if (await databaseHasUsers()) {
+    return {
+      error: "Invalid username or password.",
+      credentialsConfigured: true,
+    };
+  }
 
   return {
-    user: configuredAdminUser(),
-    token,
+    error:
+      "Admin credentials are not configured. Create an admin user with `npm run admin:create-user` or set SETUP_USERNAME and SETUP_PASSWORD_HASH.",
+    credentialsConfigured: false,
   };
 }
 
-async function createSessionForAdmin(): Promise<{ token: string }> {
+async function createSessionForUser(userId: string): Promise<{ token: string }> {
   await deleteExpiredSessions();
 
   const token = generateSessionToken();
@@ -123,7 +212,7 @@ async function createSessionForAdmin(): Promise<{ token: string }> {
     Date.now() + SESSION_DURATION_HOURS * 60 * 60 * 1000,
   );
 
-  await createSessionRow(randomUUID(), ADMIN_SESSION_USER_ID, tokenHash, expiresAt);
+  await createSessionRow(randomUUID(), userId, tokenHash, expiresAt);
 
   return { token };
 }
@@ -133,9 +222,17 @@ export async function verifyToken(token: string): Promise<AuthenticatedUser | nu
   const tokenHash = hashOpaqueToken(token);
   const session = await findSessionByTokenHash(tokenHash);
   if (!session) return null;
-  if (session.user_id !== ADMIN_SESSION_USER_ID) return null;
-  if (!adminCredentialsConfigured()) return null;
-  return configuredAdminUser();
+  if (session.user_id === ADMIN_SESSION_USER_ID) {
+    if (!adminCredentialsConfigured()) return null;
+    return configuredAdminUser();
+  }
+
+  const user = await findUserById(session.user_id);
+  if (!user) {
+    await deleteSession(session.id);
+    return null;
+  }
+  return userRowToAuthenticatedUser(user);
 }
 
 export async function logoutUser(token: string): Promise<void> {

@@ -1411,14 +1411,14 @@ function setupHtml(user?: AuthenticatedUser | null): string {
           </div>
           <div class="notice">
             <strong>Production safety:</strong>
-            <span>Set <code>SETUP_USERNAME</code> with either <code>SETUP_PASSWORD</code> or <code>SETUP_PASSWORD_HASH</code>. Secrets entered here are not echoed back by the dashboard.</span>
+            <span>Use a database admin user for hosted deployments, or set <code>SETUP_USERNAME</code> with <code>SETUP_PASSWORD_HASH</code> as an env fallback. Secrets entered here are not echoed back by the dashboard.</span>
           </div>
           <details class="setup-guide">
             <summary>Credential guide</summary>
             <dl>
               <div>
                 <dt>Admin login</dt>
-                <dd>Protects this setup page. Set <code>SETUP_USERNAME</code> and either <code>SETUP_PASSWORD</code> or <code>SETUP_PASSWORD_HASH</code>. <a href="https://docs.railway.com/variables" target="_blank" rel="noreferrer">Railway variables</a></dd>
+                <dd>Protects this setup page. Create a database user with <code>npm run admin:create-user</code>, or set <code>SETUP_USERNAME</code> and <code>SETUP_PASSWORD_HASH</code>. <a href="https://docs.railway.com/variables" target="_blank" rel="noreferrer">Railway variables</a></dd>
               </div>
               <div>
                 <dt>Langdock API key and Agent ID</dt>
@@ -2347,7 +2347,7 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
 
     const loginResult = await loginAdmin(username, password);
     if ("error" in loginResult) {
-      return reply.status(adminCredentialsConfigured() ? 401 : 503).send({
+      return reply.status(loginResult.credentialsConfigured ? 401 : 503).send({
         error: "LOGIN_FAILED",
         message: loginResult.error,
       });
@@ -2360,8 +2360,12 @@ export function registerSetup(app: FastifyInstance, ctx: BridgeContext): void {
     if (rejectCrossOriginPost(request, reply)) return;
     const token = sessionTokenFromRequest(request);
     if (token) await logoutUser(token);
+    const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
     return reply
-      .header("set-cookie", "session=; path=/; max-age=0; SameSite=Lax")
+      .header(
+        "set-cookie",
+        `session=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly${secure}`,
+      )
       .send({ ok: true });
   });
 

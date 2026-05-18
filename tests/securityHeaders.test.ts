@@ -107,8 +107,22 @@ describe("session cookie", () => {
     });
     expect(res.statusCode).toBe(200);
     const setCookie = String(res.headers["set-cookie"] ?? "");
-    expect(setCookie).toContain("max-age=0");
+    expect(setCookie.toLowerCase()).toContain("max-age=0");
     expect(setCookie).toContain("SameSite=Lax");
+    expect(setCookie).toContain("HttpOnly");
+    await app.close();
+  });
+
+  it("uses Secure on session cookies in production", async () => {
+    process.env.NODE_ENV = "production";
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth",
+      payload: { mode: "login", username: ADMIN_USERNAME, password: ADMIN_PASSWORD },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(String(res.headers["set-cookie"] ?? "")).toContain("Secure");
     await app.close();
   });
 });
