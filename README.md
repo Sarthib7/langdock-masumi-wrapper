@@ -8,7 +8,8 @@ It implements:
 - `GET  /`            — minimal operator setup UI for posting Langdock and
   Masumi credentials into `.env` and the running process.
 - `GET/POST /setup/config` — redacted setup status and persistent credential update.
-- Setup login UI — authenticate with admin credentials configured on the server
+- Setup login UI — authenticate with database admin users created by
+  `npm run admin:create-user`, or with server env fallback credentials
   (`SETUP_USERNAME` + `SETUP_PASSWORD_HASH`, or `SETUP_PASSWORD`).
 - `GET /setup/registry/status` — polls Payment Service registry records and saves
   `AGENT_IDENTIFIER` once the registration returns one.
@@ -75,13 +76,16 @@ cp .env.example .env
 | `PAYMENT_SERVICE_URL` | API base URL. Use Masumi SaaS `/pay/api/v1` or direct payment-node `/api/v1`. |
 | `PAYMENT_API_KEY` | Masumi SaaS API key or direct Payment Service token. |
 | `PAYMENT_API_AUTH_HEADER` | Optional override: `x-api-key` for SaaS, `token` for direct node. Auto-detected from the URL. |
-| `NETWORK` | `Preprod` or `Mainnet`. |
+| `NETWORK` | `Preprod` or `Mainnet`; the same wrapper routes work on both networks. |
 | `PRICE_AMOUNTS` | Optional dynamic `RequestedFunds` JSON array. Leave empty for fixed pricing configured in Masumi SaaS/admin. |
 | `HITL_CHAT_MODE` | Set `true` to keep paid Langdock jobs open as a chat. After each answer `/status` returns `awaiting_input`; `/provide_input` continues until the user sends `DONE`. |
 | `INPUT_SCHEMA_PATH` / `INPUT_SCHEMA_JSON` | MIP-003 schema served at `/input_schema`. |
 | `REQUIRE_PRODUCTION_CONFIG` | Set `true` to make startup fail until production env is complete. Leave unset/false when the admin still needs to use the locked setup UI. |
-| `SETUP_USERNAME` / `SETUP_PASSWORD_HASH` | Required admin login for the hosted setup UI. Browser registration is disabled. |
-| `SETUP_PASSWORD` | Plaintext admin password accepted when your deployment secret store is private. |
+| `DATABASE_URL` | Optional Postgres auth store for database-backed admin login. Use this on hosted/Mainnet deployments. |
+| `DATABASE_SSL` | Set `require` when your Postgres URL needs SSL and does not include `sslmode=require`. |
+| `DB_PATH` | Optional local sql.js auth database path when `DATABASE_URL` is unset. |
+| `SETUP_USERNAME` / `SETUP_PASSWORD_HASH` | Env fallback admin login for first boot or simple deployments. Browser registration is disabled. |
+| `SETUP_PASSWORD` | Plaintext fallback accepted for development/private stores; use `SETUP_PASSWORD_HASH` or database users for production Mainnet. |
 | `SETUP_ACCESS_TOKEN` | Optional bearer/basic API access token for setup endpoints. Admin username/password remains the browser login. |
 | `SETUP_ENV_PATH` | Optional path where `POST /setup/config` writes persistent env config. Defaults to `.env` in the current working directory. |
 
@@ -114,7 +118,8 @@ curl -s http://localhost:3000/ready
 The check fails on missing admin login, missing Langdock credentials, missing
 Masumi identity/payment credentials in `masumi` mode, insecure non-local HTTP
 API URLs, invalid payment windows, invalid dynamic pricing, or an empty/duplicate
-input schema.
+input schema. `NETWORK=Mainnet` also requires `PAYMENT_MODE=masumi`, public
+non-local service URLs, and hashed/database admin authentication.
 
 ### Hosted setup UI
 
@@ -126,7 +131,16 @@ are not returned by `GET /setup/config` or the UI status panel. Empty secret
 fields keep their previous value so refreshing status or changing non-secret
 settings does not erase credentials.
 
-Configure the admin login before exposing the page. Use either a bcrypt hash:
+Configure the admin login before exposing the page. For hosted deployments,
+prefer a database-backed admin user:
+
+```bash
+npm run build
+DATABASE_URL="postgres://..." npm run db:migrate-auth
+DATABASE_URL="postgres://..." npm run admin:create-user -- --username operator
+```
+
+The server can also use a bcrypt hash fallback:
 
 ```bash
 SETUP_USERNAME="operator"
@@ -141,7 +155,8 @@ SETUP_PASSWORD="<set-a-private-admin-password>"
 ```
 
 `SETUP_ACCESS_TOKEN` is still accepted as an API bearer token for setup routes,
-but the browser login does not allow public registration.
+but the browser login does not allow public registration. Use at least 32 random
+characters if you enable it.
 
 The setup UI also includes **Agent slots**. Each slot can be saved into
 `AGENTS_JSON`, which exposes a separate route namespace:
@@ -198,7 +213,8 @@ through a tunnel and use that tunnel URL as `PUBLIC_BASE_URL`.
 
 | Field | What it is for | Where to get it |
 |-------|----------------|-----------------|
-| `SETUP_USERNAME` / `SETUP_PASSWORD_HASH` | Admin login for the setup UI. This is not provided by a vendor; generate it yourself. | Store them in your deployment variables. `SETUP_PASSWORD` is also supported. See [Railway variables](https://docs.railway.com/variables). |
+| `DATABASE_URL` | Postgres-backed admin login and sessions for hosted deployments. | Add a managed Postgres database, run `npm run db:migrate-auth`, then create an operator with `npm run admin:create-user`. |
+| `SETUP_USERNAME` / `SETUP_PASSWORD_HASH` | Env fallback admin login for the setup UI. This is not provided by a vendor; generate it yourself. | Store them in your deployment variables. `SETUP_PASSWORD` is also supported for development. See [Railway variables](https://docs.railway.com/variables). |
 | `SETUP_ACCESS_TOKEN` | Optional API bearer token for setup endpoints. | Run `openssl rand -hex 32`, then set it in deployment variables. |
 | `LANGDOCK_API_KEY` | Server-side key used by this wrapper to call Langdock. | In Langdock workspace settings, create an API key, then share your agent with that key. See [Langdock: Sharing Agents with API Keys](https://docs.langdock.com/api-endpoints/agent/agent-api-guide). |
 | `LANGDOCK_AGENT_ID` | The Langdock agent this wrapper calls. | Open the agent in Langdock and copy the ID from the URL, e.g. `https://app.langdock.com/agents/AGENT_ID/edit`. See the same [Langdock guide](https://docs.langdock.com/api-endpoints/agent/agent-api-guide). |
@@ -207,7 +223,7 @@ through a tunnel and use that tunnel URL as `PUBLIC_BASE_URL`.
 | `PAYMENT_API_KEY` | API key for the Masumi Payment Service/SaaS. | Create or copy an API key from your Payment Service/SaaS admin surface. API calls authenticate with `token` or `x-api-key`. See [Payment Service API keys](https://docs.masumi.network/api-reference/payment-service/get-api-key). |
 | `SELLER_VKEY` | Selling wallet verification key used when registering the agent and taking payment. | From the funded selling wallet in your Masumi Payment Service/admin setup. |
 | `AGENT_IDENTIFIER` | On-chain Masumi registry identifier for the legacy global endpoint. | Generated by the setup UI's **Register agent** flow or registry API. For routed agents, this is stored per profile in `AGENTS_JSON`. Use **Refresh registry** until it appears. See [Sokosumi listing guide](https://docs.masumi.network/documentation/how-to-guides/list-agent-on-sokosumi). |
-| `NETWORK` | Chooses Cardano `Preprod` or `Mainnet`. | Start with `Preprod`; switch to `Mainnet` only after end-to-end tests pass. |
+| `NETWORK` | Chooses Cardano `Preprod` or `Mainnet`; the wrapper sends this value to payment and registry API calls. | Start with `Preprod`; switch to `Mainnet` only after end-to-end tests pass with the correct Mainnet wallet/API keys. |
 
 The setup UI can also submit an on-chain registry request through the configured
 Payment Service. Registration requires a funded selling wallet and uses
@@ -220,7 +236,13 @@ being confirmed, the agent URL being public and healthy, and pricing using the
 expected settlement token:
 
 - Preprod: tUSDM `16a55b2a349361ff88c03788f93e1e966e5d689605d044fef722ddde0014df10745553444d`
-- Mainnet: USDCx `1f3aec8bfe7ea4fe14c5f121e2a92e301afe414147860d557cac7e345553444378`
+- Mainnet active stablecoin per Masumi token docs: USDCx `1f3aec8bfe7ea4fe14c5f121e2a92e301afe414147860d557cac7e345553444378`
+- Mainnet asset still referenced by the Sokosumi listing guide: USDM `c48cbb3d5e57ed56e276bc45f99ab39abe94e6cd7ac39fb402da47ad0014df105553444d`
+
+The wrapper accepts both known Mainnet settlement asset ids in readiness checks
+because the current official docs are split between the newer USDCx token page
+and the Sokosumi listing guide. Before Mainnet launch, confirm which asset your
+Masumi Payment Service/Sokosumi target expects.
 
 ## Handlers
 
